@@ -1,0 +1,13 @@
+__pycache__
+*.pyc
+*.pyo
+.env
+.env.*
+venv/
+.venv/
+*.log
+.git
+.gitignore
+README.md
+docs/
+static/ #This mounted in runtime anyway don't copy it

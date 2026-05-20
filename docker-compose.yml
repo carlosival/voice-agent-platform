@@ -1,0 +1,245 @@
+name: voice-ai-stack
+
+# ─────────────────────────────────────────────
+# Shared GPU access via CDI (best for RTX 5090)
+# ─────────────────────────────────────────────
+
+volumes:
+  hf-hub-cache:        # Shared HuggingFace model cache across all services
+  ollama_data:       # Persists Ollama downloaded models
+
+networks:
+  ai-net:
+    driver: bridge
+
+services:
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # 1. Ollama — Llama 3.1 8B (replaces vLLM, works on RTX 5090 out of the box)
+  # ──────────────────────────────────────────────────────────────────────────
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ollama
+    restart: unless-stopped
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              capabilities: [gpu]
+              count: all
+    networks:
+      - ai-net
+    healthcheck:
+      test: ["CMD-SHELL", "ollama list || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 120s
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # 2. Ollama Init — pulls Llama 3.1 8B on first start then exits
+  # ──────────────────────────────────────────────────────────────────────────
+  ollama-init:
+    image: ollama/ollama:latest
+    container_name: ollama-init
+    restart: "no"
+    volumes:
+      - ollama_data:/root/.ollama
+    entrypoint: >
+      sh -c "
+        ollama serve &
+        sleep 5 &&
+        ollama pull llama3.1:8b &&
+        echo '✅ Llama 3.1 8B ready'
+      "
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              capabilities: [gpu]
+              count: all
+    networks:
+      - ai-net
+    depends_on:
+      ollama:
+        condition: service_healthy
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # 2. Speaches — STT (Faster-Whisper) + TTS (Piper)
+  # ──────────────────────────────────────────────────────────────────────────
+  speaches:
+    image: ghcr.io/speaches-ai/speaches:latest-cuda #speaches-blackwell 
+    container_name: speaches
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    volumes:
+      - hf-hub-cache:/home/ubuntu/.cache/huggingface/hub
+    environment:
+      HUGGING_FACE_HUB_TOKEN: ${HUGGING_FACE_HUB_TOKEN}
+      # STT — Faster-Whisper
+      WHISPER__MODEL: Systran/faster-whisper-large-v3
+      WHISPER__COMPUTE_TYPE: float16        # ✅ float16 required on Blackwell (int8 crashes, float32 wastes VRAM)
+      # WHISPER__DEVICE: cuda
+      WHISPER__INFERENCE_DEVICE: cuda
+
+      # TTS — Piper
+      TTS__MODEL: speaches-ai/piper-es_ES-sharvard-medium
+      TTS__VOICE: sharvard
+
+      # ONNX Runtime — force CUDA execution provider
+      ONNX_PROVIDER: CUDAExecutionProvider
+      ONNXRUNTIME_CUDA_DEVICE_ID: "0"
+
+      # CUDA / GPU visibility
+      CUDA_VISIBLE_DEVICES: "0"
+      PRELOAD_MODELS: '["Systran/faster-whisper-large-v3", "speaches-ai/piper-es_ES-sharvard-medium"]'
+
+      OMP_NUM_THREADS: "1"
+      ORT_NUM_THREADS: "1"
+
+      # Fix ORT thread affinity in LXC — disable inter-op parallelism
+      UNSTABLE_ORT_OPTS__PROVIDER_OPTS: >-
+        {"CUDAExecutionProvider": {"device_id": "0", "arena_extend_strategy": "kNextPowerOfTwo", "cudnn_conv_algo_search": "EXHAUSTIVE", "do_copy_in_default_stream": "1"}}
+
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              capabilities: [gpu]
+              count: all
+    networks:
+      - ai-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 20s
+      timeout: 10s
+      retries: 8
+      start_period: 90s
+
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # 4. Speaches Init — downloads STT + TTS models using curl
+  #    Uses: curl
+  #    Runs once then exits. Models cached in hf-hub-cache volume.
+  # ──────────────────────────────────────────────────────────────────────────
+  speaches-init:
+    image: ghcr.io/speaches-ai/speaches:latest-cuda #speaches-blackwell
+    container_name: speaches-init
+    restart: "no"
+    volumes:
+      - hf-hub-cache:/home/ubuntu/.cache/huggingface/hub
+    environment:
+      HUGGING_FACE_HUB_TOKEN: ${HUGGING_FACE_HUB_TOKEN}
+      SPEACHES_BASE_URL: http://speaches:8000
+    networks:
+      - ai-net
+    depends_on:
+      speaches:
+        condition: service_healthy
+    entrypoint: /bin/sh
+    command:
+      - -c
+      - |
+        echo '⬇️  Downloading + loading Whisper large-v3...' &&
+        curl -sf -X POST http://speaches:8000/v1/models/Systran/faster-whisper-large-v3 &&
+        echo '✅ Whisper ready' &&
+
+        echo '⬇️  Downloading + loading Piper TTS...' &&
+        curl -sf -X POST http://speaches:8000/v1/models/speaches-ai/piper-es_ES-sharvard-medium &&
+        echo '✅ Piper ready' &&
+
+        echo '🎉 All models ready. Loaded models:' &&
+        curl -s "http://speaches:8000/v1/models" | python3 -m json.tool
+
+
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # 3. FastAPI — Voice pipeline + Twilio webhooks
+  # ──────────────────────────────────────────────────────────────────────────
+  fastapi:
+    build:
+      context: ./fastapi
+      dockerfile: Dockerfile
+    image: voice-fastapi:latest
+    container_name: fastapi
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./fastapi/static:/app/static    # TTS output audio files
+    environment:
+      # Twilio
+      TWILIO_ACCOUNT_SID: ${TWILIO_ACCOUNT_SID}
+      TWILIO_AUTH_TOKEN: ${TWILIO_AUTH_TOKEN}
+      TWILIO_PHONE_NUMBER: ${TWILIO_PHONE_NUMBER}
+      # BASE_URL is auto-resolved from ngrok at runtime (see ngrok service)
+      # Override here only if using a static domain: BASE_URL: https://yourdomain.com
+      NGROK_API_URL: http://ngrok:4040/api/tunnels
+      # Internal service URLs (Docker network DNS)
+      
+      # VAD
+      VAD_BASE_URL: ${VAD_BASE_URL}
+
+      # ── TTS ────────────────────────────────────────────────────────────────
+      TTS_BASE_URL: ${TTS_BASE_URL}
+      TTS_MODEL: ${TTS_MODEL}
+      TTS_VOICE: ${TTS_VOICE}
+
+      # ── STT ────────────────────────────────────────────────────────────────
+      STT_BASE_URL: ${STT_BASE_URL}
+      STT_MODEL: ${STT_MODEL}
+
+      # ── LLM ────────────────────────────────────────────────────────────────
+      LLM_BASE_URL: ${LLM_BASE_URL}
+      LLM_MODEL: ${LLM_MODEL}
+      LLM_API_KEY: ${GROQ_API_KEY}
+
+      # ── Google Search Tool ──────────────────────────────────────────────────────────
+      SERPER_API_KEY: ${SERPER_API_KEY}
+
+      # ── LangFuse Tracing ──────────────────────────────────────────────────────────
+      LANGFUSE_SECRET_KEY: ${LANGFUSE_SECRET_KEY}
+      LANGFUSE_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY}
+      LANGFUSE_BASE_URL: ${LANGFUSE_BASE_URL}
+    depends_on:
+      ollama:
+        condition: service_healthy
+      speaches:
+        condition: service_healthy
+    networks:
+      - ai-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health/ping"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # 4. ngrok — exposes FastAPI publicly so Twilio can reach webhooks
+  # ──────────────────────────────────────────────────────────────────────────
+  ngrok:
+    image: ngrok/ngrok:latest
+    container_name: ngrok
+    restart: unless-stopped
+    command: http fastapi:8080 --domain=${NGROK_DOMAIN} --log=stdout
+    ports:
+      - "4040:4040"                     # ngrok inspector UI → http://localhost:4040
+    environment:
+      NGROK_AUTHTOKEN: ${NGROK_AUTHTOKEN}
+    networks:
+      - ai-net
+    depends_on:
+      - fastapi
+  
+  
+
+  

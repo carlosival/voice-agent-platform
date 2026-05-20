@@ -1,0 +1,1698 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ARIA — AI Assistant</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link
+    href="https://fonts.googleapis.com/css2?family=Syne:wght@400;500;600;700;800&family=DM+Mono:wght@300;400;500&display=swap"
+    rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+  <style>
+    :root {
+      --bg: #080c10;
+      --surface: #0d1117;
+      --surface-2: #161b22;
+      --surface-3: #1c2333;
+      --border: rgba(255, 255, 255, 0.07);
+      --border-active: rgba(99, 210, 255, 0.35);
+      --accent: #63d2ff;
+      --accent-2: #a78bfa;
+      --accent-glow: rgba(99, 210, 255, 0.15);
+      --text: #e6edf3;
+      --text-dim: #7d8590;
+      --text-muted: #404952;
+      --error: #f85149;
+      --success: #3fb950;
+      --warning: #d29922;
+      --user-bubble: #1a2332;
+      --ai-bubble: #111820;
+      --radius: 16px;
+      --radius-sm: 10px;
+      --radius-xs: 6px;
+    }
+
+    *,
+    *::before,
+    *::after {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    html,
+    body {
+      height: 100%;
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'DM Mono', monospace;
+      overflow: hidden;
+    }
+
+    .app-container {
+  height: 80vh;
+  display: flex;
+}
+
+aria-chat-room {
+  flex: 1;
+  min-height: 0;
+}
+
+    /* Animated background */
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background:
+        radial-gradient(ellipse 60% 40% at 20% 10%, rgba(99, 210, 255, 0.06) 0%, transparent 60%),
+        radial-gradient(ellipse 50% 50% at 80% 90%, rgba(167, 139, 250, 0.05) 0%, transparent 60%),
+        radial-gradient(ellipse 80% 60% at 50% 50%, rgba(99, 210, 255, 0.02) 0%, transparent 70%);
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    /* Scanline effect */
+    body::after {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background: repeating-linear-gradient(0deg,
+          transparent,
+          transparent 2px,
+          rgba(0, 0, 0, 0.015) 2px,
+          rgba(0, 0, 0, 0.015) 4px);
+      pointer-events: none;
+      z-index: 999;
+    }
+
+    /* Layout */
+    .app {
+      position: relative;
+      z-index: 1;
+      display: grid;
+      grid-template-rows: 60px 1fr auto;
+      height: 100vh;
+      max-width: 900px;
+      margin: 0 auto;
+      padding: 0 16px;
+    }
+
+    /* Header */
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 4px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .logo {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .logo-mark {
+      width: 28px;
+      height: 28px;
+      position: relative;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .logo-mark svg {
+      width: 28px;
+      height: 28px;
+    }
+
+    .logo-mark .ring {
+      animation: spin 8s linear infinite;
+      transform-origin: center;
+    }
+
+    .logo-text {
+      font-family: 'Syne', sans-serif;
+      font-weight: 800;
+      font-size: 18px;
+      letter-spacing: 0.05em;
+      color: var(--text);
+    }
+
+    .logo-text span {
+      color: var(--accent);
+    }
+
+    .header-status {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 11px;
+      color: var(--text-dim);
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .status-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--text-muted);
+      transition: all 0.3s ease;
+    }
+
+    .status-dot.connected {
+      background: var(--success);
+      box-shadow: 0 0 6px var(--success);
+    }
+
+    .status-dot.connecting {
+      background: var(--warning);
+      animation: pulse 1s ease infinite;
+    }
+
+    .status-dot.error {
+      background: var(--error);
+    }
+
+    .status-dot.listening {
+      background: var(--accent);
+      box-shadow: 0 0 8px var(--accent);
+      animation: pulse 0.8s ease infinite;
+    }
+
+    .header-actions {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .icon-btn {
+      width: 32px;
+      height: 32px;
+      border-radius: var(--radius-xs);
+      border: 1px solid var(--border);
+      background: transparent;
+      color: var(--text-dim);
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.2s ease;
+    }
+
+    .icon-btn:hover {
+      border-color: var(--border-active);
+      color: var(--text);
+      background: var(--surface-2);
+    }
+
+    /* Chat area */
+    .chat-area {
+      overflow-y: auto;
+      padding: 24px 0;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+      scrollbar-width: thin;
+      scrollbar-color: var(--surface-3) transparent;
+    }
+
+    .chat-area::-webkit-scrollbar {
+      width: 4px;
+    }
+
+    .chat-area::-webkit-scrollbar-track {
+      background: transparent;
+    }
+
+    .chat-area::-webkit-scrollbar-thumb {
+      background: var(--surface-3);
+      border-radius: 2px;
+    }
+
+    /* Messages */
+    .message {
+      display: flex;
+      gap: 12px;
+      animation: fadeInUp 0.3s ease;
+    }
+
+    .message.user {
+      flex-direction: row-reverse;
+    }
+
+    .avatar {
+      width: 32px;
+      height: 32px;
+      border-radius: 8px;
+      flex-shrink: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 13px;
+      font-weight: 600;
+      font-family: 'Syne', sans-serif;
+    }
+
+    .avatar.ai {
+      background: linear-gradient(135deg, rgba(99, 210, 255, 0.2), rgba(167, 139, 250, 0.2));
+      border: 1px solid var(--border-active);
+      color: var(--accent);
+    }
+
+    .avatar.user {
+      background: var(--surface-3);
+      border: 1px solid var(--border);
+      color: var(--text-dim);
+    }
+
+    .bubble {
+      max-width: 72%;
+      padding: 12px 16px;
+      border-radius: var(--radius);
+      font-size: 14px;
+      line-height: 1.65;
+      position: relative;
+    }
+
+    .message.ai .bubble {
+      background: var(--ai-bubble);
+      border: 1px solid var(--border);
+      border-radius: 4px var(--radius) var(--radius) var(--radius);
+      color: var(--text);
+    }
+
+    .message.user .bubble {
+      background: var(--user-bubble);
+      border: 1px solid rgba(99, 210, 255, 0.15);
+      border-radius: var(--radius) 4px var(--radius) var(--radius);
+      color: var(--text);
+    }
+
+    .bubble-meta {
+      font-size: 10px;
+      color: var(--text-muted);
+      margin-top: 6px;
+      letter-spacing: 0.05em;
+    }
+
+    .message.user .bubble-meta {
+      text-align: right;
+    }
+
+    /* Typing indicator */
+    .typing-indicator {
+      display: flex;
+      gap: 4px;
+      align-items: center;
+      padding: 4px 0;
+    }
+
+    .typing-dot {
+      width: 5px;
+      height: 5px;
+      border-radius: 50%;
+      background: var(--accent);
+      animation: typingBounce 1.2s ease infinite;
+      opacity: 0.5;
+    }
+
+    .typing-dot:nth-child(2) {
+      animation-delay: 0.2s;
+    }
+
+    .typing-dot:nth-child(3) {
+      animation-delay: 0.4s;
+    }
+
+    /* Video panel */
+    .video-panel {
+      display: none;
+      position: fixed;
+      top: 72px;
+      right: 20px;
+      z-index: 100;
+      flex-direction: column;
+      gap: 8px;
+      animation: slideIn 0.3s ease;
+    }
+
+    .video-panel.visible {
+      display: flex;
+    }
+
+    .video-wrapper {
+      position: relative;
+      border-radius: var(--radius);
+      overflow: hidden;
+      border: 1px solid var(--border-active);
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6), 0 0 0 1px var(--border);
+    }
+
+    #localVideo {
+      width: 240px;
+      height: 180px;
+      object-fit: cover;
+      display: block;
+      background: var(--surface);
+    }
+
+    #remoteVideo {
+      width: 240px;
+      height: 180px;
+      object-fit: cover;
+      display: block;
+      background: var(--surface);
+    }
+
+    .video-label {
+      position: absolute;
+      bottom: 8px;
+      left: 8px;
+      font-size: 10px;
+      color: var(--text-dim);
+      background: rgba(0, 0, 0, 0.6);
+      padding: 2px 6px;
+      border-radius: 4px;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+    }
+
+    /* Audio visualizer */
+    .visualizer-container {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 3px;
+      height: 32px;
+      padding: 4px 0;
+    }
+
+    .viz-bar {
+      width: 3px;
+      height: 4px;
+      background: var(--accent);
+      border-radius: 2px;
+      transition: height 0.1s ease;
+      opacity: 0.7;
+    }
+
+    /* Bottom input area */
+    .input-area {
+      padding: 16px 0 20px;
+      border-top: 1px solid var(--border);
+    }
+
+    /* Connection bar */
+    .connection-bar {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 12px;
+      padding: 8px 12px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+    }
+
+    .connection-bar input {
+      flex: 1;
+      background: transparent;
+      border: none;
+      outline: none;
+      font-family: 'DM Mono', monospace;
+      font-size: 12px;
+      color: var(--text-dim);
+      letter-spacing: 0.03em;
+    }
+
+    .connection-bar input::placeholder {
+      color: var(--text-muted);
+    }
+
+    /* Connect button */
+    .connect-btn {
+      padding: 4px 12px;
+      background: var(--accent);
+      color: var(--bg);
+      border: none;
+      border-radius: var(--radius-xs);
+      font-family: 'DM Mono', monospace;
+      font-size: 11px;
+      font-weight: 500;
+      cursor: pointer;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      transition: all 0.2s ease;
+    }
+
+    .connect-btn:hover {
+      background: #8ae4ff;
+    }
+
+    .connect-btn.disconnect {
+      background: rgba(248, 81, 73, 0.2);
+      color: var(--error);
+    }
+
+    .connect-btn.disconnect:hover {
+      background: rgba(248, 81, 73, 0.3);
+    }
+
+    .connect-btn {
+      padding: 4px 12px;
+      background: var(--accent);
+      color: var(--bg);
+      border: none;
+      border-radius: var(--radius-xs);
+      font-family: 'DM Mono', monospace;
+      font-size: 11px;
+      font-weight: 500;
+      cursor: pointer;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      transition: all 0.2s ease;
+    }
+
+    .connect-btn:hover {
+      background: #8ae4ff;
+    }
+
+    .connect-btn.disconnect {
+      background: rgba(248, 81, 73, 0.2);
+      color: var(--error);
+    }
+
+    .connect-btn.disconnect:hover {
+      background: rgba(248, 81, 73, 0.3);
+    }
+
+    /* Main input row */
+    .input-row {
+      display: flex;
+      align-items: flex-end;
+      gap: 8px;
+    }
+
+    .text-input-wrapper {
+      flex: 1;
+      position: relative;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      transition: all 0.2s ease;
+      overflow: hidden;
+    }
+
+    .text-input-wrapper:focus-within {
+      border-color: var(--border-active);
+      box-shadow: 0 0 0 3px var(--accent-glow);
+    }
+
+    #messageInput {
+      width: 100%;
+      background: transparent;
+      border: none;
+      outline: none;
+      padding: 14px 48px 14px 16px;
+      font-family: 'DM Mono', monospace;
+      font-size: 14px;
+      color: var(--text);
+      resize: none;
+      min-height: 50px;
+      max-height: 140px;
+      line-height: 1.5;
+      overflow-y: auto;
+      scrollbar-width: none;
+    }
+
+    #messageInput::placeholder {
+      color: var(--text-muted);
+    }
+
+    #messageInput::-webkit-scrollbar {
+      display: none;
+    }
+
+    .send-btn {
+      position: absolute;
+      right: 10px;
+      bottom: 10px;
+      width: 30px;
+      height: 30px;
+      border-radius: var(--radius-xs);
+      border: none;
+      background: var(--accent);
+      color: var(--bg);
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.2s ease;
+    }
+
+    .send-btn:hover {
+      background: #8ae4ff;
+      transform: scale(1.05);
+    }
+
+    .send-btn:disabled {
+      background: var(--text-muted);
+      cursor: not-allowed;
+      transform: none;
+    }
+
+    /* Control buttons */
+    .ctrl-btn {
+      width: 50px;
+      height: 50px;
+      border-radius: var(--radius-sm);
+      border: 1px solid var(--border);
+      background: var(--surface);
+      color: var(--text-dim);
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.25s ease;
+      flex-shrink: 0;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .ctrl-btn::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background: var(--accent);
+      opacity: 0;
+      transition: opacity 0.25s ease;
+    }
+
+    .ctrl-btn:hover {
+      border-color: var(--border-active);
+      color: var(--text);
+    }
+
+    .ctrl-btn:hover::before {
+      opacity: 0.08;
+    }
+
+    .ctrl-btn.active {
+      border-color: var(--accent);
+      color: var(--accent);
+      box-shadow: 0 0 12px var(--accent-glow), inset 0 0 12px var(--accent-glow);
+    }
+
+    .ctrl-btn.active::before {
+      opacity: 0.1;
+    }
+
+    .ctrl-btn.recording {
+      border-color: var(--error);
+      color: var(--error);
+      box-shadow: 0 0 12px rgba(248, 81, 73, 0.2);
+      animation: recordPulse 1.5s ease infinite;
+    }
+
+    .ctrl-btn svg {
+      position: relative;
+      z-index: 1;
+    }
+
+    /* Hint text */
+    .input-hint {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-top: 8px;
+      font-size: 10px;
+      color: var(--text-muted);
+      letter-spacing: 0.05em;
+      padding: 0 2px;
+    }
+
+    .key-hint {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    kbd {
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 1px 5px;
+      font-family: 'DM Mono', monospace;
+      font-size: 10px;
+      color: var(--text-dim);
+    }
+
+    /* Empty state */
+    .empty-state {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 16px;
+      padding: 40px;
+      text-align: center;
+      animation: fadeIn 0.5s ease;
+    }
+
+    .empty-icon {
+      width: 64px;
+      height: 64px;
+      border-radius: 16px;
+      background: linear-gradient(135deg, rgba(99, 210, 255, 0.1), rgba(167, 139, 250, 0.1));
+      border: 1px solid var(--border-active);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin-bottom: 8px;
+    }
+
+    .empty-state h2 {
+      font-family: 'Syne', sans-serif;
+      font-size: 22px;
+      font-weight: 700;
+      color: var(--text);
+    }
+
+    .empty-state p {
+      font-size: 13px;
+      color: var(--text-dim);
+      max-width: 320px;
+      line-height: 1.6;
+    }
+
+    .suggestions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      justify-content: center;
+      margin-top: 8px;
+    }
+
+    .suggestion-chip {
+      padding: 8px 14px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 100px;
+      font-size: 12px;
+      color: var(--text-dim);
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+
+    .suggestion-chip:hover {
+      border-color: var(--border-active);
+      color: var(--accent);
+      background: var(--surface-2);
+    }
+
+    /* Toast notifications Candidate to elimination
+  .toast-area {
+    position: fixed;
+    bottom: 100px;
+    right: 20px;
+    z-index: 200;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .toast {
+    padding: 10px 16px;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    font-size: 12px;
+    color: var(--text);
+    animation: slideInRight 0.3s ease, fadeOut 0.3s ease 2.7s forwards;
+    max-width: 280px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .toast.success { border-color: rgba(63,185,80,0.4); }
+  .toast.error { border-color: rgba(248,81,73,0.4); }
+  .toast.info { border-color: var(--border-active); }
+  */
+
+    /* Animations */
+    @keyframes spin {
+      from {
+        transform: rotate(0deg);
+      }
+
+      to {
+        transform: rotate(360deg);
+      }
+    }
+
+    @keyframes pulse {
+
+      0%,
+      100% {
+        opacity: 1;
+      }
+
+      50% {
+        opacity: 0.4;
+      }
+    }
+
+    @keyframes fadeInUp {
+      from {
+        opacity: 0;
+        transform: translateY(8px);
+      }
+
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    @keyframes fadeIn {
+      from {
+        opacity: 0;
+      }
+
+      to {
+        opacity: 1;
+      }
+    }
+
+    @keyframes slideIn {
+      from {
+        opacity: 0;
+        transform: translateX(10px);
+      }
+
+      to {
+        opacity: 1;
+        transform: translateX(0);
+      }
+    }
+
+    @keyframes slideInRight {
+      from {
+        opacity: 0;
+        transform: translateX(20px);
+      }
+
+      to {
+        opacity: 1;
+        transform: translateX(0);
+      }
+    }
+
+    @keyframes fadeOut {
+      from {
+        opacity: 1;
+      }
+
+      to {
+        opacity: 0;
+      }
+    }
+
+    @keyframes typingBounce {
+
+      0%,
+      60%,
+      100% {
+        transform: translateY(0);
+        opacity: 0.5;
+      }
+
+      30% {
+        transform: translateY(-6px);
+        opacity: 1;
+      }
+    }
+
+    @keyframes recordPulse {
+
+      0%,
+      100% {
+        box-shadow: 0 0 12px rgba(248, 81, 73, 0.2);
+      }
+
+      50% {
+        box-shadow: 0 0 20px rgba(248, 81, 73, 0.5);
+      }
+    }
+
+    @keyframes vizDance {
+
+      0%,
+      100% {
+        height: 4px;
+      }
+
+      50% {
+        height: 20px;
+      }
+    }
+  </style>
+</head>
+
+<body>
+  <div class="app">
+
+    <!-- Header -->
+    <header>
+      <div class="logo">
+        <div class="logo-mark">
+          <svg viewBox="0 0 28 28" fill="none">
+            <circle cx="14" cy="14" r="5" fill="#63d2ff" opacity="0.9" />
+            <circle class="ring" cx="14" cy="14" r="10" stroke="#63d2ff" stroke-width="1" stroke-dasharray="4 3"
+              opacity="0.4" />
+            <circle cx="14" cy="14" r="13" stroke="rgba(99,210,255,0.15)" stroke-width="1" />
+          </svg>
+        </div>
+        <span class="logo-text">ARI<span>A</span></span>
+      </div>
+
+      <header-status></header-status>
+
+      <div class="header-actions">
+        <button class="icon-btn" title="Clear chat" onclick="clearChat()">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="3 6 5 6 21 6" />
+            <path d="M19 6l-1 14H6L5 6" />
+            <path d="M10 11v6M14 11v6" />
+            <path d="M9 6V4h6v2" />
+          </svg>
+        </button>
+        <button class="icon-btn" title="Settings" onclick="toggleSettings()">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="3" />
+            <path
+              d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+          </svg>
+        </button>
+      </div>
+    </header>
+
+    <!-- Chat -->
+    <!--  
+    <div class="chat-area" id="chatArea">
+      <div class="empty-state" id="emptyState">
+        <div class="empty-icon">
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#63d2ff" stroke-width="1.5">
+            <path d="M12 2a10 10 0 1 0 10 10" />
+            <path d="M12 6v6l4 2" />
+            <circle cx="19" cy="5" r="3" fill="#63d2ff" opacity="0.6" />
+          </svg>
+        </div>
+        <h2>How can I help you?</h2>
+        <p>Connect your mic for voice input, stream video from your camera, or simply type a message below.</p>
+        <div class="suggestions">
+          <div class="suggestion-chip" onclick="insertSuggestion('Summarize the latest AI research trends')">Summarize
+            AI trends</div>
+          <div class="suggestion-chip" onclick="insertSuggestion('Help me write a Python script to analyze CSV data')">
+            Write Python script</div>
+          <div class="suggestion-chip" onclick="insertSuggestion('Explain quantum computing in simple terms')">Explain
+            quantum computing</div>
+          <div class="suggestion-chip" onclick="insertSuggestion('What are the best practices for WebRTC?')">WebRTC best
+            practices</div>
+        </div>
+      </div>
+    </div>
+    -->
+
+    <div class="app-container">
+    <!-- Use the Web Component here -->
+    <aria-chat-room id="ariaChat" style="padding: 16px;">
+  
+        <!-- Visualizer ABOVE text area -->
+        <div slot="visualizer" style="display:flex; gap:16px;">
+          <audio-viz source="remote"></audio-viz>
+        </div>
+
+        <!-- Mic BELOW text area -->
+        <mic-controller slot="mic-control"></mic-controller>
+
+        <!-- Camera BELOW text area -->
+        <button slot="camera-control" class="ctrl-btn" onclick="toggleCamera()">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polygon points="23 7 16 12 23 17 23 7"></polygon>
+            <rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect>
+          </svg>
+        </button>
+
+        <!-- Other Generic/Media slots -->
+        <button slot="media-upload" class="icon-btn">📎</button>
+        
+    </aria-chat-room>
+  </div>
+
+    <!-- Input area -->
+    <div class="input-area">
+      <!-- Connection bar -->
+      <div class="connection-bar">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+          style="color:var(--text-muted);flex-shrink:0">
+          <path d="M5 12.55a11 11 0 0 1 14.08 0" />
+          <path d="M1.42 9a16 16 0 0 1 21.16 0" />
+          <path d="M8.53 16.11a6 6 0 0 1 6.95 0" />
+          <circle cx="12" cy="20" r="1" />
+        </svg>
+        <input type="text" id="wsUrl" value="ws://localhost:8080/ws/" placeholder="ws://localhost:8080/ws/"
+          spellcheck="false" />
+        <!-- <button class="connect-btn" id="connectBtn" onclick="toggleConnection()">CONNECT</button> -->
+        <connect-btn></connect-btn>
+      </div>
+
+      <!-- Main input row -->
+      <div class="input-row">
+        <!-- Mic button -->
+        <mic-controller></mic-controller>
+        <!--
+      <button class="ctrl-btn" id="micBtn" title="Toggle microphone" onclick="toggleMic()">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+          <path d="M19 10v2a7 7 0 0 1-14 0v-2M12 19v4M8 23h8"/>
+        </svg>
+      </button>
+      -->
+
+        <div style="display:flex; gap:16px; justify-content:center; padding: 8px 0;">
+          <audio-viz source="mic"></audio-viz>
+          <audio-viz source="remote"></audio-viz>
+        </div>
+
+
+        <!-- Text input -->
+        <div class="text-input-wrapper">
+          <textarea id="messageInput" placeholder="Message ARIA..." rows="1" onkeydown="handleKeyDown(event)"
+            oninput="autoResize(this)"></textarea>
+          <button class="send-btn" id="sendBtn" onclick="sendMessage()" title="Send (Enter)">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+              <line x1="22" y1="2" x2="11" y2="13" />
+              <polygon points="22 2 15 22 11 13 2 9 22 2" />
+            </svg>
+          </button>
+        </div>
+
+        <!-- Video/Camera button -->
+        <button class="ctrl-btn" id="camBtn" title="Toggle camera stream" onclick="toggleCamera()">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polygon points="23 7 16 12 23 17 23 7" />
+            <rect x="1" y="5" width="15" height="14" rx="2" ry="2" />
+          </svg>
+        </button>
+      </div>
+
+      <div class="input-hint">
+        <div class="key-hint">
+          <kbd>Enter</kbd><span>send</span>&nbsp;&nbsp;<kbd>Shift</kbd>+<kbd>Enter</kbd><span>newline</span>
+        </div>
+        <div id="charCount" style="color:var(--text-muted)"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Video panels -->
+  <div class="video-panel" id="videoPanel">
+    <div class="video-wrapper">
+      <video id="localVideo" autoplay muted playsinline></video>
+      <div class="video-label">YOU</div>
+    </div>
+    <div class="video-wrapper" id="remoteWrapper" style="display:none">
+      <video id="remoteVideo" autoplay playsinline></video>
+      <div class="video-label">ARIA</div>
+    </div>
+  </div>
+
+  <!-- Visualizer -->
+  <!-- <div class="visualizer-container" id="visualizer" style="display:none;position:fixed;bottom:180px;left:50%;transform:translateX(-50%);z-index:50"> -->
+  <!-- bars injected by JS -->
+  <!--</div> -->
+
+  <script src="static/rtcutils/constant.js"></script>
+  <script src="static/rtcutils/config.js"></script>
+  <script src="static/rtcutils/audio_router.js"></script> <!-- 1st: creates window.audioRouters -->
+  <script src="static/rtcutils/webrtc.js"></script> <!-- 4th: defines WebRTCController -->
+  <script src="static/rtcutils/chat.js"></script>
+  <script src="static/rtcutils/connect_btn.js"></script>
+  <script src="static/rtcutils/header_status.js"></script>
+  <script src="static/rtcutils/mic.js"></script> <!-- 2nd: defines <mic-controller> -->
+  <script src="static/rtcutils/audio.visualizer.js"></script> <!-- 3rd: defines <audio-viz> -->
+  <script src="static/rtcutils/toast.js"></script>
+
+  <!-- Toast area -->
+  <toast-container></toast-container>
+  <!-- <div class="toast-area" id="toastArea"></div> -->
+
+  <script>
+
+    // ─── NEW: module instances ────────────────────────────────────────────────────
+    let rtc = null;
+    // ─── State ───────────────────────────────────────────────────────────────────
+    let ws = null;
+    let pc = null;
+    let localStream = null;
+    let micStream = null;
+    let micActive = false;
+    let camActive = false;
+    let isConnected = false;
+    let isConnecting = false;
+    let messages = [];
+    let audioContext = null;
+    let analyser = null;
+    let vizAnimId = null;
+    let audioUnlocked = false;
+
+
+    // ─── Connection ──────────────────────────────────────────────────────────────
+
+    // ─── Connection ──────────────────────────────────────────────────────────────
+
+    function toggleConnection() {
+      if (rtc) {
+        rtc.disconnect();
+        rtc = null;
+        setStatus('offline');
+        connectBtn.textContent = 'CONNECT';
+        connectBtn.classList.remove('disconnect');
+        return;
+      }
+
+
+      // --- FIX STARTS HERE ---
+      // 1. Get the base host (e.g., epiphanic-marriageable-keely.ngrok-free.dev)
+      const host = window.location.host;
+
+      // 2. Use wss if the page is https, otherwise use ws
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+
+      // 3. Construct the full URL
+      const url = `${protocol}//${host}/ws/`;
+      // --- FIX ENDS HERE ---
+
+      if (!url) return;
+
+      setStatus('connecting');
+      connectBtn.textContent = 'DISCONNECT';
+      connectBtn.classList.add('disconnect');
+
+      rtc = new WebRTCController(url);
+
+      rtc.connect();
+    }
+
+
+
+    // ─── Elements ─────────────────────────────────────────────────────────────────
+    const chatArea = document.getElementById('chatArea');
+    const emptyState = document.getElementById('emptyState');
+    const connectBtn = document.getElementById('connectBtn');
+    const wsUrlInput = document.getElementById('wsUrl');
+    const micBtn = document.getElementById('micBtn');
+    const camBtn = document.getElementById('camBtn');
+    const msgInput = document.getElementById('messageInput');
+    const videoPanel = document.getElementById('videoPanel');
+    const visualizer = document.getElementById('visualizer');
+    const localVideo = document.getElementById('localVideo');
+    const remoteVideo = document.getElementById('remoteVideo');
+    const remoteWrap = document.getElementById('remoteWrapper');
+    const remoteAudio = document.createElement("audio");
+    remoteAudio.autoplay = true;
+    remoteAudio.volume = 1.0;
+    document.body.appendChild(remoteAudio);
+
+
+    // Recording audio
+
+    let mediaRecorder;
+    let recordedChunks = [];
+    let recordedStream;
+
+    function startRecording(stream) {
+      recordedChunks = [];
+
+      mediaRecorder = new MediaRecorder(stream, {
+        mimeType: "audio/webm;codecs=opus"
+      });
+
+      mediaRecorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          recordedChunks.push(event.data);
+        }
+      };
+
+      mediaRecorder.onstop = () => {
+        const blob = new Blob(recordedChunks, {
+          type: "audio/webm"
+        });
+
+        saveRecording(blob);
+      };
+
+      mediaRecorder.start();
+      console.log("🎙️ Recording started");
+    }
+
+    function stopRecording() {
+      if (mediaRecorder && mediaRecorder.state !== "inactive") {
+        mediaRecorder.stop();
+        console.log("⏹️ Recording stopped");
+      }
+    }
+
+    function saveRecording(blob) {
+      const url = URL.createObjectURL(blob);
+
+      const a = document.createElement("a");
+      a.style.display = "none";
+      a.href = url;
+      a.download = `peer-audio-${Date.now()}.webm`;
+
+      document.body.appendChild(a);
+      a.click();
+
+      URL.revokeObjectURL(url);
+      a.remove();
+
+      console.log("💾 Recording saved");
+    }
+
+
+    // ─── Visualizer bars ──────────────────────────────────────────────────────────
+    const BAR_COUNT = 20;
+    for (let i = 0; i < BAR_COUNT; i++) {
+      const bar = document.createElement('div');
+      bar.className = 'viz-bar';
+      bar.style.animationDelay = `${i * 0.06}s`;
+      visualizer.appendChild(bar);
+    }
+    const vizBars = visualizer.querySelectorAll('.viz-bar');
+
+
+
+
+    function getWsUrl() {
+      const proto = location.protocol === "https:" ? "wss:" : "ws:";
+      const host = location.hostname;
+      const port = location.port;
+
+      // Production (behind nginx, same domain)
+      if (host !== "localhost" && host !== "127.0.0.1") {
+        return `${proto}//${host}/ws/`;          // wss://yourdomain.com/ws/
+      }
+
+      // Local dev (direct to FastAPI)
+      return `ws://localhost:8080/ws/`;
+    }
+
+    // Use it in your connect function
+    const WS_URL = getWsUrl();
+
+
+    async function connect() {
+      const url = WS_URL;
+      if (!url) return toast('Enter a WebSocket URL', 'error');
+
+      isConnecting = true;
+      setStatus('connecting', 'CONNECTING…');
+      connectBtn.textContent = 'CANCEL';
+
+      try {
+        ws = new WebSocket(url);
+
+        ws.onopen = async () => {
+          isConnected = true;
+          isConnecting = false;
+          setStatus('connected', 'CONNECTED');
+          connectBtn.textContent = 'DISCONNECT';
+          connectBtn.classList.add('disconnect');
+          toast('WebSocket connected', 'success');
+
+          // ✅ Start WebRTC immediately — don't wait for mic/camera button
+          await setupWebRTC();
+        };
+
+        ws.onmessage = async (e) => {
+          try {
+            const msg = JSON.parse(e.data);
+            await handleSignaling(msg);
+          } catch {
+            // Plain text message from AI
+            appendMessage('ai', e.data);
+          }
+        };
+
+        ws.onerror = () => {
+          toast('WebSocket error', 'error');
+          disconnect(false);
+        };
+
+        ws.onclose = () => {
+          if (isConnected) {
+            toast('WebSocket disconnected', 'info');
+            disconnect(false);
+          }
+        };
+      } catch (err) {
+        toast('Connection failed: ' + err.message, 'error');
+        isConnecting = false;
+        setStatus('', 'OFFLINE');
+        connectBtn.textContent = 'CONNECT';
+        connectBtn.classList.remove('disconnect');
+      }
+    }
+
+    function disconnect(notify = true) {
+      isConnected = false;
+      isConnecting = false;
+
+      if (pc) { pc.close(); pc = null; }
+      if (ws) { try { ws.close(); } catch { } ws = null; }
+
+      setStatus('', 'OFFLINE');
+      connectBtn.textContent = 'CONNECT';
+      connectBtn.classList.remove('disconnect');
+      if (notify) toast('Disconnected', 'info');
+    }
+
+    //---- WebRTC Helpers ----
+
+
+    async function renegotiate() {
+      if (!pc || !isConnected) return;          // guard: no PC or WS yet
+      if (ws?.readyState !== WebSocket.OPEN) return; // guard: WS must be open
+
+      try {
+        const offer = await pc.createOffer();
+        await pc.setLocalDescription(offer);
+        ws.send(JSON.stringify({ type: offer.type, sdp: offer.sdp }));
+        console.log('Renegotiation offer sent');
+      } catch (err) {
+        console.error('Renegotiation failed:', err);
+      }
+    }
+
+    // ─── WebRTC ───────────────────────────────────────────────────────────────────
+    async function setupWebRTC() {
+
+      // ✅ Always get mic before creating offer
+      if (!micStream) {
+        try {
+          micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+          localStream = micStream;
+          micActive = true;
+          micBtn.classList.add('recording');
+          //startVisualizer(micStream);
+        } catch (err) {
+          toast('Mic permission denied: ' + err.message, 'error');
+          return;
+        }
+      }
+
+
+      document.addEventListener('click', () => {
+        if (remoteAudio && remoteAudio.paused) remoteAudio.play().catch(() => { });
+      }, { once: true });
+
+      pc = new RTCPeerConnection({
+        iceServers: [
+          { urls: "stun:stun.cloudflare.com:3478" },
+          { urls: "stun:stun.l.google.com:19302" },
+          { urls: "stun:stun1.l.google.com:19302" },
+        ]
+      });
+
+      if (localStream) {
+        localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
+      }
+
+      pc.ontrack = (e) => {
+        console.log("ontrack fired:", e.track.kind, e.streams);
+        if (e.track.kind === "audio") {
+          console.log("✅ Got audio track from server");
+          remoteAudio.srcObject = e.streams[0];
+
+          //startRecording(remoteAudio.srcObject);
+
+          startVisualizer(remoteAudio.srcObject);
+          // Force play (browser autoplay policy requires user gesture)
+          remoteAudio.play().catch(err => {
+            console.warn("Autoplay blocked:", err);
+            toast("Click anywhere to enable audio", "warning");
+          });
+
+          toast("Receiving audio from ARIA", "success");
+
+        }
+        if (e.track.kind === "video") {
+          remoteVideo.srcObject = e.streams[0];
+          remoteWrap.style.display = "block";
+        }
+      };
+
+      pc.onicecandidate = (e) => {
+        if (e.candidate && ws?.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: 'candidate', candidate: e.candidate }));
+        }
+      };
+
+      pc.onconnectionstatechange = () => {
+        if (pc.connectionState === 'connected') setStatus('connected', 'RTC ACTIVE');
+        if (pc.connectionState === 'disconnected') setStatus('connected', 'CONNECTED');
+      };
+
+      const offer = await pc.createOffer({
+        offerToReceiveAudio: true,
+        offerToReceiveVideo: false
+      });
+      await pc.setLocalDescription(offer);
+      ws.send(JSON.stringify(offer));
+    }
+
+
+
+
+    async function handleSignaling(msg) {
+      if (!pc && (msg.type === 'offer' || msg.type === 'answer')) {
+        if (!isConnected) return;
+        await setupWebRTC();
+      }
+
+      if (msg.type === 'answer' && pc) {
+        await pc.setRemoteDescription(new RTCSessionDescription(msg));
+        // Debug: check SDP has sendrecv or sendonly for audio
+        const sdp = pc.remoteDescription.sdp;
+        const hasAudio = sdp.includes("m=audio");
+        const direction = sdp.match(/a=(sendrecv|sendonly|recvonly|inactive)/)?.[1];
+        console.log("SDP has audio:", hasAudio, "direction:", direction);
+      }
+
+      if (msg.type === 'offer' && pc) {
+        await pc.setRemoteDescription(new RTCSessionDescription(msg));
+        const answer = await pc.createAnswer();
+        await pc.setLocalDescription(answer);
+        ws.send(JSON.stringify(answer));
+      }
+
+      if (msg.type === 'candidate' && pc) {
+        try { await pc.addIceCandidate(new RTCIceCandidate(msg.candidate)); } catch { }
+      }
+
+      // Text response from AI pipeline
+      if (msg.type === 'text' && msg.content) {
+        appendMessage('ai', msg.content);
+      }
+    }
+
+    // ─── Media controls ───────────────────────────────────────────────────────────
+    async function toggleMic() {
+      if (micActive) {
+        stopMic();
+      } else {
+        await startMic();
+      }
+    }
+
+    async function startMic() {
+      try {
+        micStream = await navigator.mediaDevices.getUserMedia({
+          audio: {
+            echoCancellation: false,
+            noiseSuppression: false,
+            autoGainControl: true,
+          },
+          video: false
+        });
+        micActive = true;
+        micBtn.classList.add('recording');
+        setStatus('listening', 'LISTENING');
+        toast('Microphone active', 'success');
+        //startVisualizer(micStream);
+
+        if (!localStream) localStream = micStream;
+        else micStream.getAudioTracks().forEach(t => localStream.addTrack(t));
+
+        if (isConnected && pc) {
+          micStream.getAudioTracks().forEach(track => pc.addTrack(track, localStream));
+          // ✅ Renegotiate
+          const offer = await pc.createOffer();
+          await pc.setLocalDescription(offer);
+          ws.send(JSON.stringify(offer));
+        } else if (isConnected) {
+          await setupWebRTC();
+        }
+      } catch (err) {
+        toast('Mic error: ' + err.message, 'error');
+      }
+    }
+
+    async function stopMic() {
+      if (micStream) {
+        if (pc) {
+          micStream.getAudioTracks().forEach(track => {
+            const sender = pc.getSenders().find(s => s.track === track);
+            if (sender) pc.removeTrack(sender);
+          });
+          await renegotiate(); // tell server this track is gone
+        }
+        micStream.getAudioTracks().forEach(t => t.stop());
+        micStream = null;
+      }
+
+      micActive = false;
+      micBtn.classList.remove('recording');
+      stopVisualizer();
+      if (camActive) setStatus('connected', 'CONNECTED');
+      else if (isConnected) setStatus('connected', 'CONNECTED');
+      else setStatus('', 'OFFLINE');
+      toast('Microphone off', 'info');
+    }
+
+    async function toggleCamera() {
+      if (camActive) {
+        stopCamera();
+      } else {
+        await startCamera();
+      }
+    }
+
+    async function startCamera() {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: true });
+        camActive = true;
+        camBtn.classList.add('active');
+        localVideo.srcObject = stream;
+        videoPanel.classList.add('visible');
+        toast('Camera stream active', 'success');
+
+        if (!localStream) localStream = stream;
+        else stream.getTracks().forEach(t => localStream.addTrack(t));
+
+        if (isConnected && pc) {
+          stream.getTracks().forEach(track => pc.addTrack(track, localStream));
+          // renegotiate
+          const offer = await pc.createOffer();
+          await pc.setLocalDescription(offer);
+          ws.send(JSON.stringify({ type: offer.type, sdp: offer.sdp }));
+        } else if (isConnected) {
+          await setupWebRTC();
+        }
+      } catch (err) {
+        toast('Camera error: ' + err.message, 'error');
+      }
+    }
+
+    function stopCamera() {
+      if (localVideo.srcObject) {
+        localVideo.srcObject.getVideoTracks().forEach(t => t.stop());
+        localVideo.srcObject = null;
+      }
+      camActive = false;
+      camBtn.classList.remove('active');
+      if (!micActive) videoPanel.classList.remove('visible');
+      toast('Camera off', 'info');
+    }
+
+
+    async function unlockAudio() {
+      if (audioUnlocked) return;
+      const ctx = new AudioContext();
+      await ctx.resume();
+      audioUnlocked = true;
+      console.log("Audio context unlocked");
+    }
+
+
+    // ─── Audio Visualizer ─────────────────────────────────────────────────────────
+
+    function startVisualizer(stream) {
+      audioContext = new (window.AudioContext || window.webkitAudioContext)();
+      analyser = audioContext.createAnalyser();
+      analyser.fftSize = 64;
+      const src = audioContext.createMediaStreamSource(stream);
+      src.connect(analyser);
+      visualizer.style.display = 'flex';
+      animateVisualizer();
+    }
+
+    function animateVisualizer() {
+      const data = new Uint8Array(analyser.frequencyBinCount);
+      function draw() {
+        vizAnimId = requestAnimationFrame(draw);
+        analyser.getByteFrequencyData(data);
+        vizBars.forEach((bar, i) => {
+          const val = data[i] || 0;
+          bar.style.height = Math.max(4, (val / 255) * 28) + 'px';
+        });
+      }
+      draw();
+    }
+
+    function stopVisualizer() {
+      if (vizAnimId) cancelAnimationFrame(vizAnimId);
+      if (audioContext) { audioContext.close(); audioContext = null; }
+      vizBars.forEach(b => b.style.height = '4px');
+      visualizer.style.display = 'none';
+    }
+
+    // ─── Chat ─────────────────────────────────────────────────────────────────────
+    /*
+    function appendMessage(role, text) {
+      emptyState.style.display = 'none';
+    
+      const msg = document.createElement('div');
+      msg.className = `message ${role}`;
+    
+      const now = new Date();
+      const time = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    
+      msg.innerHTML = `
+        <div class="avatar ${role}">${role === 'ai' ? 'AR' : 'ME'}</div>
+        <div>
+          <div class="bubble">${escapeHtml(text)}</div>
+          <div class="bubble-meta">${time}</div>
+        </div>
+      `;
+    
+      chatArea.appendChild(msg);
+      chatArea.scrollTop = chatArea.scrollHeight;
+      messages.push({ role, text, time });
+    }
+    
+    function showTyping() {
+      const el = document.createElement('div');
+      el.className = 'message ai';
+      el.id = 'typingIndicator';
+      el.innerHTML = `
+        <div class="avatar ai">AR</div>
+        <div class="bubble">
+          <div class="typing-indicator">
+            <div class="typing-dot"></div>
+            <div class="typing-dot"></div>
+            <div class="typing-dot"></div>
+          </div>
+        </div>
+      `;
+      chatArea.appendChild(el);
+      chatArea.scrollTop = chatArea.scrollHeight;
+    }
+    
+    function hideTyping() {
+      const el = document.getElementById('typingIndicator');
+      if (el) el.remove();
+    }
+    
+    function sendMessage() {
+      const text = msgInput.value.trim();
+      if (!text) return;
+    
+      appendMessage('user', text);
+      msgInput.value = '';
+      autoResize(msgInput);
+    
+      if (isConnected && ws?.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: 'text', content: text }));
+        showTyping();
+        // typing indicator removed when AI replies
+        setTimeout(hideTyping, 8000); // fallback
+      } else {
+        toast('Not connected to server', 'error');
+        // Demo echo in offline mode
+        setTimeout(() => {
+          appendMessage('ai', `[Offline] Echo: ${text}`);
+        }, 600);
+      }
+    }
+    
+    function handleKeyDown(e) {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        sendMessage();
+      }
+    }
+    
+    function autoResize(el) {
+      el.style.height = 'auto';
+      el.style.height = Math.min(el.scrollHeight, 140) + 'px';
+      const len = el.value.length;
+      document.getElementById('charCount').textContent = len > 0 ? len + ' chars' : '';
+    }
+    
+    function clearChat() {
+      chatArea.innerHTML = '';
+      chatArea.appendChild(emptyState);
+      emptyState.style.display = 'flex';
+      messages = [];
+    }
+    
+    function insertSuggestion(text) {
+      msgInput.value = text;
+      msgInput.focus();
+      autoResize(msgInput);
+    }
+    
+    function escapeHtml(s) {
+      return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    }
+    */
+    // ─── Toast ────────────────────────────────────────────────────────────────────
+    /*
+    function toast(msg, type = 'info') {
+      const icons = {
+        success: '✓',
+        error: '✕',
+        info: 'ℹ'
+      };
+      const el = document.createElement('div');
+      el.className = `toast ${type}`;
+      el.innerHTML = `<span style="color:${type==='success'?'var(--success)':type==='error'?'var(--error)':'var(--accent)'}">${icons[type]}</span> ${msg}`;
+      document.getElementById('toastArea').appendChild(el);
+      setTimeout(() => el.remove(), 3000);
+    }
+    
+    function toggleSettings() {
+      toast('Settings coming soon', 'info');
+    }
+    */
+    // ─── Init ─────────────────────────────────────────────────────────────────────
+    function toast(message, type = "info", duration = 3000) {
+      window.dispatchEvent(new CustomEvent(AppEvents.TOAST, {
+        detail: { message, type, duration }
+      }));
+    }
+    msgInput.addEventListener('input', () => autoResize(msgInput));
+  </script>
+</body>
+
+</html>

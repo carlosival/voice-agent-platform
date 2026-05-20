@@ -1,0 +1,16 @@
+fastapi/static/stt_debug
+fastapi/static/tts_debug
+speaches
+scripts/export_sec.sh
+.env
+__pycache__
+venv/
+.venv
+.venv_fastapi
+.venv_agent
+.venv_agent_fastapi
+.venv_agent_fastapi_smol
+.venv_agent_fastapi_smol_tools
+.venv_agent_fastapi_smol_tools_yaafpy
+.venv_agent_fastapi_smol_tools_yaafpy_openai
+.venv_agent_fastapi_smol_tools_yaafpy_openai_whisper

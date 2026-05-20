@@ -1,0 +1,19 @@
+.toolbar-viz {
+  position: absolute;
+  bottom: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.bubble-viz {
+  display: inline-flex;
+  vertical-align: middle;
+  margin-left: 8px;
+}
+
+.status-viz {
+  position: fixed;
+  bottom: 0;
+  width: 100%;
+  justify-content: center;
+}
