@@ -1,0 +1,58 @@
+Tier 1: The Gateway / Orchestrator (The Control Plane)The Gateway is your system's public face. It is a lightweight, stateless HTTP/WebSocket server (built with FastAPI, Node.js, or Go) that manages API traffic, user authentication, and—most importantly—session routing.[ Client App ] ──( 1. POST /session/init )──> [ Tier 1: Gateway ]
+                                                      │
+                                           ( 2. Query Warm Workers )
+                                                      ▼
+                                              [ Tier 2: Redis ]
+Detailed Workflow & Security HandshakeWhen a client application (web or mobile) wants to start a voice call or chat session, it never connects directly to a media server. Instead, it completes a secure handshake:Session Request: The client sends an authenticated HTTP request to the Gateway: POST [https://api.yourdomain.com/v1/sessions/initialize](https://api.yourdomain.com/v1/sessions/initialize).Capacity Lookup: The Gateway queries the Tier 2 Redis cluster to find the healthiest, least-utilized Bot Worker in the user's closest geographical region.Token Generation: The Gateway generates a cryptographically signed, short-lived Session Token (using a secret key shared only between Tier 1 and Tier 3). This token encodes the session_id, user_id, and an expiration timestamp (e.g., valid for 60 seconds).The Routing Response: The Gateway saves the reservation in Redis and returns a payload containing the direct target address to the client:JSON{
+  "session_id": "9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d",
+  "connection_url": "wss://worker-us-east-04.internal.yourdomain.com:8443/ws",
+  "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.ey..."
+}
+Production Security BoundariesAPI Gateway Isolation: Tier 1 acts as a shield. It handles rate-limiting (e.g., maximum 3 call attempts per minute per user) and prevents DDoS attacks from ever reaching your heavy, high-CPU media containers.SSL Termination: Tier 1 can handle global SSL termination, or route traffic to subdomains directly mapped to your worker instances (e.g., using wildcard SSL certificates like *.workers.yourdomain.com).Tier 2: The State Mesh (Redis Cluster)Because your worker instances are distributed across different virtual machines or regions, they need a lightning-fast, centralized ledger to communicate their availability and manage global application state. You implement this using an in-memory Redis Cluster.    [ Tier 1: Gateway ]              [ Tier 3: Bot Workers ]
+            │                                   │
+   ( Reads Pool State )                ( Heartbeats & Claims )
+            ▼                                   ▼
+┌──────────────────────────────────────────────────────────┐
+│              TIER 2: REDIS IN-MEMORY MESH                │
+│                                                          │
+│  [ Hash: workers:us-east-04 ]                            │
+│  ├── ip: "143.244.11.22"                                 │
+│  ├── active_connections: 4                               │
+│  └── max_capacity: 10                                    │
+│                                                          │
+│  [ Set: active_tokens ] ── "valid_tokens:eyJhbGci..."    │
+└──────────────────────────────────────────────────────────┘
+Detailed Redis Data StructuresYour system relies on two main data structures inside Redis to coordinate horizontal scaling:1. Worker Capacity Ledger (Hashes with Expirations)Every single Bot Worker instance running in Tier 3 registers itself in Redis using a Hash key pattern (workers:{worker_id}) and keeps it alive using a 5-second TTL (Time to Live) heartbeat:Command: HSET workers:worker-us-east-04 ip "143.244.11.22" port "8443" active 4 max 10 region "us-east"Command: EXPIRE workers:worker-us-east-04 10If a worker node crashes or loses network connectivity, its key naturally expires and disappears from Redis within 10 seconds. Tier 1 will instantly stop routing new users to it.2. Single-Use Token SetTo prevent malicious users from replay-attacking your worker endpoints, tokens are validated against Redis using atomic operations:Command: SET valid_tokens:eyJhbGci... "9b1deb4d..." EX 60Tier 3: The Stateful Worker Pool (Your Custom Framework)This is where your FastAPI, aiortc, and yaafpy.StreamWorkflow code lives. These servers are highly optimized, compute-heavy boxes responsible for processing raw media, calling external ML models, and executing the loop logic you wrote.[ Client App ] ──( 3. Establish Persistent WebRTC + WebSocket )──> [ Bot Worker 04 ]
+                                                                        │
+                                                               ├── PipelineWorker
+                                                               └── VOICE_WORKFLOW
+Detailed Internal Architecture per Worker NodeInstead of running a single monolithic process, each Tier 3 server instance runs a resource-isolated pool structure:The Signaling Gate: The client opens a WebSocket connection directly to the assigned worker machine. The worker grabs the query token, hits Redis to verify and instantly delete it (GETDEL valid_tokens:token), ensuring it can never be used again.Allocating the Lifecycle Worker: Once authorized, the worker initializes your PeerSession and spins up the asynchronous PipelineWorker loop we designed earlier to isolate client inputs.WebRTC Media Negotiation: The client and worker exchange WebRTC SDP Offers/Answers over the WebSocket. Once completed, the client establishes a peer-to-peer UDP connection over a high-range port directly to the worker. Audio frames begin streaming.The Network & Firewall Isolation MatrixBecause WebRTC relies on dynamic port allocation for media streaming (UDP traffic), security firewalls must be structured very precisely:ProtocolPort RangeDirectionExposed ToPurposeTCP8443 (or 443)InboundPublic InternetSecure WebSocket Signaling HandlerUDP10000 - 20000InboundPublic InternetICE Candidates & Live WebRTC Media StreamsTCP6379OutboundInternal Only (VPC)Communication to Tier 2 Redis Cluster🔒 API Key Security Isolation: Your worker nodes are entirely blind to the client's internal environment. Your high-value production API keys (OpenAI, Deepgram, etc.) are injected into Tier 3 containers using a secure secrets manager (like AWS Secrets Manager or HashiCorp Vault) only at runtime. The client application never sees or touches an API key.Advanced Horizontal Autoscaling MatrixScaling this system based on traditional metrics like CPU usage will break it. If an LLM or TTS engine spikes your container's CPU to 90% for a fraction of a second during a sentence generation, standard autoscaling rules might spin up 5 new servers unnecessarily.Instead, use Slot-Capacity Autoscaling Strategy:[ Global Pool Utilization Monitor ]
+               │
+               ├─> Total Global Active Slots / Total Max Capacity > 75%
+               │   ▼
+               │   Action: Spin up a new Tier 3 Node Instance (Pre-warm)
+               │
+               └─> Worker receives SIGTERM (Rolling Update)
+                   ▼
+                   Action: Enter "Draining" state. Allow active calls to finish.
+                           Reject new connections. Close when calls == 0.
+1. Slot Allocation MathIf a single dedicated CPU Droplet or VM can comfortably handle 10 concurrent WebRTC calls without audio degradation, its max capacity is 10.Total Global Capacity = Number of active workers * 10.Your DevOps metrics system tracks the ratio: Total Active Calls / Total Global Capacity.2. The Graceful "Draining" Mechanism (Zero-Downtime Deployments)When you push a code update or want to scale down an empty instance, you cannot just kill the container. You must implement a Draining State Process:Python# Pseudo-logic inside your Worker's system signal handler
+import sys
+import asyncio
+
+async def handle_sigterm(worker_id, redis_client):
+    logger.info("SIGTERM received! Entering graceful draining mode...")
+    
+    # 1. Update status in Redis so Tier 1 stops sending new calls here
+    await redis_client.hset(f"workers:{worker_id}", "status", "draining")
+    
+    # 2. Continually monitor active calls in your local active_connections set
+    while len(active_connections) > 0:
+        logger.info(f"Draining... {len(active_connections)} calls still active.")
+        await asyncio.sleep(5)
+        
+    # 3. Once empty, close background loops and exit cleanly
+    logger.info("All calls finished. Safe to shut down container.")
+    await close_all_peers()
+    sys.exit(0)
+This 3-tier architecture guarantees that your media-heavy workloads are fully decoupled, completely secure, and capable of expanding smoothly from 5 concurrent calls to 5,000 without hitting architectural limitations.
