@@ -5,38 +5,56 @@ class ConnectBtn extends HTMLElement {
         super();
         this.attachShadow({ mode: "open" });
         this.state = "offline"; // "offline", "connecting", "connected"
-        this.rtcController = new WebRTCController(this.getWSUrl() || AppConfig.WS_URL);
+        this.rtcController = null;
     }
 
-    getWSUrl() {
-        // --- FIX STARTS HERE ---
-        // 1. Get the base host (e.g., epiphanic-marriageable-keely.ngrok-free.dev)
-        const host = window.location.host;
+    async getWSUrl() {
 
-        // 2. Use wss if the page is https, otherwise use ws
-        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-
-        // 3. Construct the full URL
-        const url = `${protocol}//${host}/ws/`;
-        // --- FIX ENDS HERE ---
-        return url;
-    }
-
-    connectedCallback() {
-        this.render();
-        this.btn = this.shadowRoot.querySelector("button");
-        this.btn.addEventListener("click", () => this.toggle());
-
-        // Listen to connection changes to update visual state automatically
-        window.addEventListener(AppEvents.RTC_STATECHANGE, (e) => {
-            const { state } = e.detail;
-            if (state === "connected") {
-                this.setState("connected");
-            } else if (state === "disconnected" || state === "failed" || state === "closed") {
-                this.setState("offline");
-            }
+        const response = await fetch(CONSTANTS.WS_INIT_URL, {
+        method: "POST",
+        headers: {
+            "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+            agent_id: AppConfig.AGENT_ID || "test-agent",
+            pk: AppConfig.PK || "test-pk",
+        }),
         });
 
+        const data = await response.json();
+
+        return data.connection_url;
+    }
+
+    async connectedCallback() {
+
+        try {
+
+            const wsUrl = await this.getWSUrl();
+
+            console.log("RTC initialized:", wsUrl);
+
+            this.rtcController = new WebRTCController(wsUrl);
+
+            this.render();
+            this.btn = this.shadowRoot.querySelector("button");
+            this.btn.addEventListener("click", () => this.toggle());
+
+            // Listen to connection changes to update visual state automatically
+            window.addEventListener(AppEvents.RTC_STATECHANGE, (e) => {
+                const { state } = e.detail;
+                if (state === "connected") {
+                    this.setState("connected");
+                } else if (state === "disconnected" || state === "failed" || state === "closed") {
+                    this.setState("offline");
+                }
+            });
+
+        } catch (err) {
+            console.error("Failed to initialize RTC:", err);
+        }
+        
+        /*
         window.addEventListener(AppEvents.WS_CLOSED, () => {
             this.setState("offline");
         });
@@ -44,6 +62,7 @@ class ConnectBtn extends HTMLElement {
         window.addEventListener(AppEvents.WS_ERROR, () => {
             this.setState("offline");
         });
+        */
     }
 
     setState(newState) {

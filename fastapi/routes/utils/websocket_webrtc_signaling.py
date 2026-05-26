@@ -9,6 +9,8 @@ from aiortc.sdp import candidate_from_sdp
 from routes.utils.webrtc_peer import create_peer
 from audio_track import AudioOutputTrack
 from uuid import uuid4
+import jwt
+from functools import wraps
 
 logger = logging.getLogger(__name__)
 
@@ -26,15 +28,13 @@ ALLOWED_ORIGINS = [
 
 async def signaling_handler(ws: WebSocket):
 
-    # ── Origin check ──────────────────────────────────────────────────────
-    origin = ws.headers.get("origin", "null")
-    if origin not in ALLOWED_ORIGINS:
-        logger.warning(f"Rejected connection from origin: {origin}")
-        await ws.close(code=1008)
-        return
+    # ── JWT check through decorators ─────────────────────────────────────────────────────────
+    
+    # ── Origin check through decorators ──────────────────────────────────────────────────────
+    
 
     await ws.accept()
-    logger.info(f"WebSocket connected from origin: {origin}")
+
     peer_session = await create_peer(ws)
     pc = peer_session.pc
     ctx = peer_session.ctx
@@ -42,15 +42,17 @@ async def signaling_handler(ws: WebSocket):
     output_track = ctx.shared_data["resources"]["output_track"]
 
     try:
-        while True:                                           # ✅ if/elif now inside loop
-
-            message = await ws.receive_text()
-
+        while True:       
             try:
+                message = await ws.receive_text()
                 data = json.loads(message)
             except json.JSONDecodeError:
                 logger.warning(f"Invalid JSON received: {message}")
-                continue
+                break
+            except WebSocketDisconnect:
+                break
+            except Exception as e:
+                break
 
             msg_type = data.get("type")
 
@@ -88,15 +90,6 @@ async def signaling_handler(ws: WebSocket):
 
                 logger.info("Sent WebRTC answer: %s", pc.localDescription.sdp)
 
-            # ── Text message ───────────────────────────────────────────────
-            elif msg_type == "text":                          # ✅ was "if", broke elif chain
-                text = data.get("content") or data.get("text", "")
-                logger.info(f"Text message: {text}")
-
-                asyncio.ensure_future(
-                    handle_text_and_respond(text, ctx)
-                )
-
             # ── ICE candidate ──────────────────────────────────────────────
             elif msg_type == "candidate":
                 raw = data.get("candidate")
@@ -126,24 +119,69 @@ async def signaling_handler(ws: WebSocket):
     except Exception as e:
         logger.error(f"Unexpected error in signaling handler: {e}", exc_info=True)
 
-    finally:
-        
-        # 1. Kill all the background pipelines tasks
-        # When the connection dies, kill all associated tasks
-        # Cancel everything first
-        for task in tasks:
-            if not task.done():
-                task.cancel()
+    finally: 
+        logger.info("WebSocket Closed.")
 
-        # Then await them all at once
-        if tasks:
-            await asyncio.gather(*tasks, return_exceptions=True)
-            logger.info("Pipeline task cancelled.")
-       
-        # 2. Close WebRTC (This clears ICE, Transceivers, etc.)
-        await pc.close()
-        logger.info("Peer connection closed.")
 
+
+def websocket_origin_required(func):
+    @wraps(func)
+    async def wrapper(ws: WebSocket, *args, **kwargs):
+
+
+        # ── Origin check ──────────────────────────────────────
+        origin = ws.headers.get("origin", "null")
+
+        if origin not in ALLOWED_ORIGINS:
+            logger.warning(
+                f"Rejected connection from origin: {origin}"
+            )
+            await ws.close(code=1008)
+            return
+
+        # Continue to actual handler
+        return await func(ws, *args, **kwargs)
+
+    return wrapper
+
+
+def websocket_auth_required(func):
+    @wraps(func)
+    async def wrapper(ws: WebSocket, *args, **kwargs):
+
+        # ── JWT check ─────────────────────────────────────────
+        token = ws.query_params.get("token")
+
+        if not token:
+            logger.warning("Rejected: missing token")
+            await ws.close(code=1008)
+            return
+
+        try:
+            payload = jwt.decode(
+                token,
+                SECRET_KEY,
+                algorithms=["HS256"]
+            )
+
+
+            logger.info(
+                f"Authenticated user: {payload.get('sub')}"
+            )
+
+        except jwt.ExpiredSignatureError:
+            logger.warning("Rejected: token expired")
+            await ws.close(code=1008)
+            return
+
+        except jwt.InvalidTokenError:
+            logger.warning("Rejected: invalid token")
+            await ws.close(code=1008)
+            return
+        # Continue to actual handler
+        return await func(ws, *args, **kwargs)
+
+    return wrapper
 
 
 async def handle_text_and_respond(text: str, ctx):

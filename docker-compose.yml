@@ -5,8 +5,10 @@ name: voice-ai-stack
 # ─────────────────────────────────────────────
 
 volumes:
-  hf-hub-cache:        # Shared HuggingFace model cache across all services
+  hf-hub-cache:      # Shared HuggingFace model cache across all services
   ollama_data:       # Persists Ollama downloaded models
+  postgres_data:     # Persists PostgreSQL data
+  redis_data:        # Persists Redis data
 
 networks:
   ai-net:
@@ -181,6 +183,7 @@ services:
       TWILIO_AUTH_TOKEN: ${TWILIO_AUTH_TOKEN}
       TWILIO_PHONE_NUMBER: ${TWILIO_PHONE_NUMBER}
       # BASE_URL is auto-resolved from ngrok at runtime (see ngrok service)
+      DOMAIN: ${DOMAIN}
       # Override here only if using a static domain: BASE_URL: https://yourdomain.com
       NGROK_API_URL: http://ngrok:4040/api/tunnels
       # Internal service URLs (Docker network DNS)
@@ -240,6 +243,29 @@ services:
     depends_on:
       - fastapi
   
+
+  redis:
+    image: redis:7-alpine
+    container_name: redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+    command: ["redis-server", "--save", "60", "1", "--loglevel", "warning", "--requirepass", "your_strong_password",]
+
+  postgres:
+    image: postgres:15-alpine
+    container_name: postgres
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_USER=myuser
+      - POSTGRES_PASSWORD=mypassword
+      - POSTGRES_DB=voice_agent
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
   
 
   

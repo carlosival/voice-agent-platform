@@ -77,9 +77,9 @@ async def create_peer(ws: WebSocket):
         "message_history": peer_session.memory,
         "resources": {
             "output_track": output_track,
-            "ws": ws,
             "http_client": ws.app.state.http,
-            "tracer": ws.app.state.tracer
+            "tracer": ws.app.state.tracer,
+            "peer_connection": pc,
         }
     })
 
@@ -96,10 +96,14 @@ async def create_peer(ws: WebSocket):
     # ── ICE state logging ─────────────────────────────────────────────────
     @pc.on("iceconnectionstatechange")
     async def on_ice_state():
-        logger.info(f"ICE state: {pc.iceConnectionState}")
-        if pc.iceConnectionState == "failed":
+        logger.info(f"ICE state: {peer_session.pc.iceConnectionState}")
+        if peer_session.pc.iceConnectionState == "failed":
             logger.error("ICE failed — no valid path found")
-            await pc.close()
+        if peer_session.pc.iceConnectionState in ["connected", "completed"]:
+            logger.info("ICE connected")
+            if peer_session.pc.connectionState == "connected":
+                logger.info("PeerConnection established — closing WebSocket")
+                await ws.close(code=1000)
 
     # ── Connection state logging ───────────────────────────────────────────
     @pc.on("connectionstatechange")
@@ -112,6 +116,13 @@ async def create_peer(ws: WebSocket):
                     task.cancel()
             active_connections.discard(peer_session)
             logger.info(f"Peer removed — active connections: {len(active_connections)}")
+        
+        if peer_session.pc.connectionState in ["connected", "completed"]:
+            logger.info("PeerConnection established")
+            if peer_session.pc.iceConnectionState in ["connected", "completed"]:
+                logger.info("PeerConnection and ICE connected — closing WebSocket")
+                await ws.close(code=1000)
+
 
     # ── Track handler ─────────────────────────────────────────────────────
     @pc.on("track")
@@ -151,8 +162,8 @@ async def audio_pipeline(input_track, ctx):
     source = track_frames(input_track)
     output_track = ctx.shared_data["resources"]["output_track"]
     logger.info("Pipeline starting")
-    ws = ctx.shared_data["resources"]["ws"]
     trace_id = ctx.shared_data["trace_context"]["trace_id"]
+    pc = ctx.shared_data["resources"]["peer_connection"]
     
     # 1. Manually start the root observation — no context manager needed
     session_trace = ctx.shared_data["resources"]["tracer"].start_observation(
@@ -206,6 +217,27 @@ async def audio_pipeline(input_track, ctx):
         
     finally:
 
+        # 1. Ensure the output track is cleared and resources are freed
+        try:    
+            # Stop MediaStreamTrack incoming frames
+            input_track.stop()    
+            # Detach the output track queue from the program, let the clean up to GC
+            output_track.purge() 
+            
+            # Stop outgoing frames to frontend 
+            output_track.stop()
+            logger.info("Pipeline: Resources cleaned up.")
+             
+        except Exception as cleanup_err:
+            logger.error(f"Error during pipeline cleanup: {cleanup_err}")
+
+        # 3. Close WebRTC (This clears ICE, Transceivers, etc.)
+        try:
+            await pc.close()
+            logger.info("Peer connection closed.")
+        except Exception as e:
+            logger.error(f"Failed to close peer connection: {e}")           
+
         # 4. Finalize the master root trace right before clearing memory allocations
         try:
             
@@ -221,38 +253,6 @@ async def audio_pipeline(input_track, ctx):
             ctx.shared_data["resources"]["tracer"].flush()
         except Exception as trace_end_err:
             logger.error(f"Failed to cleanly commit final Langfuse trace state: {trace_end_err}")
-
-        # Ensure the output track is cleared and resources are freed
-        try:
-            # 1. Tell the frontend why we are leaving
-            try:
-                if ws.client_state == WebSocketState.CONNECTED:
-                    await ws.send_json({
-                        "type": "control",
-                        "action": "close",
-                        "reason": "inactivity_timeout"
-                    })
-                    # 2. Close the socket gracefully
-                    await ws.close(code=1000)
-            except Exception as e:
-                logger.error(f"Failed to send WebSocket close signal: {e}")
-            
-            # Stop MediaStreamTrack incoming frames
-            input_track.stop()    
-            # Detach the output track queue from the program, let the clean up to GC
-            output_track.purge() 
-            
-            # Stop outgoing frames to frontend 
-            output_track.stop()
-            logger.info("Pipeline: Resources cleaned up.")
-            
-            # 2. Close the WebSocket — frontend will receive onclose event
-           # if ws and (ws.client_state == WebSocketState.CONNECTED or ws.application_state == WebSocketState.CONNECTED):
-           #     await ws.close(code=1000, reason="Inactivity limit reached")
-           # else:
-            #    logger.info("WebSocket already closed, skipping close.")   
-        except Exception as cleanup_err:
-            logger.error(f"Error during pipeline cleanup: {cleanup_err}")
 
     logger.info("Pipeline finished")
 

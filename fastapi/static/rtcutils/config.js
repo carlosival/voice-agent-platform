@@ -1,5 +1,6 @@
 const AppConfig = Object.freeze({
 
-    WS_URL: 'ws://localhost:8080/ws/',
+    AGENT_ID: 'test-agent',
+    PK: 'test-pk',
 
 });

@@ -9,6 +9,25 @@ class WebRTCController {
     this.remoteCandidatesQueue = [];
   }
 
+
+  async getWSUrl() {
+
+        const response = await fetch(CONSTANTS.WS_INIT_URL, {
+        method: "POST",
+        headers: {
+            "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+            agent_id: AppConfig.AGENT_ID || "test-agent",
+            pk: AppConfig.PK || "test-pk",
+        }),
+        });
+
+        const data = await response.json();
+
+        return data.connection_url;
+    }
+
   // ─── CONNECT ─────────────────────────────────────────────
 
   async connect() {
@@ -26,10 +45,13 @@ class WebRTCController {
       this.ws.close();
     }
 
+    try {
+      this.wsUrl = await this.getWSUrl();
+      console.log("WebSocket URL:", this.wsUrl);
+      // 2. Create new WebSocket connection
+      this.ws = new WebSocket(this.wsUrl);
 
-    this.ws = new WebSocket(this.wsUrl);
-
-    this.ws.onopen = async () => {
+      this.ws.onopen = async () => {
       await this.setupPeerConnection();
       await this.createAndSendOffer();
       this.setupEventListeners();
@@ -52,16 +74,7 @@ class WebRTCController {
     };
 
     this.ws.onclose = () => {
-      this.disconnect();
-      window.dispatchEvent(new CustomEvent(AppEvents.WS_CLOSED));
-      
-    };
-
-  }
-
-
-  disconnect() {
-    if (this.ws) {
+      if (this.ws) {
       this.ws.onopen = null;
       this.ws.onmessage = null;
       this.ws.onerror = null;
@@ -69,6 +82,27 @@ class WebRTCController {
       this.ws.close();
       this.ws = null;
     }
+      window.dispatchEvent(new CustomEvent(AppEvents.WS_CLOSED));
+      
+    };
+
+    this.ws.onerror = (err) => {
+      console.error("WebSocket error:", err);
+    };
+    } catch (error) {
+      console.error("Failed to get WS URL:", error);
+      return;
+    }
+
+    
+
+    
+
+  }
+
+
+  disconnect() {
+    
     if (this.pc) {
       // Remove listeners to prevent them from firing during the close process
       this.pc.ontrack = null;
@@ -142,12 +176,15 @@ class WebRTCController {
     // ─── ICE ─────────────────────────
 
     this.pc.onicecandidate = (e) => {
-      if (e.candidate) {
-        this.ws.send(JSON.stringify({
-          type: "candidate",
-          candidate: e.candidate
-        }));
-      }
+      // Check if the WebSocket is actually open before trying to send
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      this.ws.send(JSON.stringify({
+        type: "candidate",
+        candidate: e.candidate
+      }));
+    } else {
+      console.log("⏳ ICE candidate gathered, but signaling WebSocket is already closed. Skipping trickle.");
+    }
     };
 
     this.pc.onconnectionstatechange = () => {
@@ -163,9 +200,8 @@ class WebRTCController {
         window.dispatchEvent(new CustomEvent(AppEvents.RTC_CONNECTED));
       }
       // Don't try to reconnect on failure, the user will handle it button
-      if (this.pc.connectionState === "failed") {
+      if (this.pc.connectionState === "failed" || this.pc.connectionState === "closed") {
         this.disconnect();
-        //setTimeout(() => this.connect(), 2000);
       };
 
     };
@@ -192,6 +228,27 @@ class WebRTCController {
     }
   }
 
+
+  closeWebSocket() {
+  if (this.ws) {
+    console.log("🔌 WebRTC connected! Client is closing the signaling WebSocket safely.");
+    
+    // Nullify listeners first so the onclose handler doesn't trigger 
+    // accidental UI disconnection states
+    this.ws.onopen = null;
+    this.ws.onmessage = null;
+    this.ws.onerror = null;
+    this.ws.onclose = null;
+    
+    // Close with a standard normal closure code
+    this.ws.close(1000); 
+    this.ws = null;
+    
+    window.dispatchEvent(new CustomEvent(AppEvents.WS_CLOSED));
+  }
+}
+
+  // This not belong here, Is not part fo the process of setup WebRtC peer connection
   handleChatMessage(msg) {
     try {
       console.log("Received chat message from WS:", msg);

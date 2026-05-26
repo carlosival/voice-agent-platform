@@ -1,3 +1,11 @@
+const BASE_URL = window.location.origin;
+const WS_INIT_URL    = `${BASE_URL}/ws/v1/sessions/initialize`;
+
+const CONSTANTS = Object.freeze({
+    BASE_URL: BASE_URL,
+    WS_INIT_URL: WS_INIT_URL
+});
+
 const AppEvents = Object.freeze({
     // WebSocket Events
     WS_CONNECTING: 'ws:connecting',
