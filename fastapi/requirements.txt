@@ -10,6 +10,8 @@ aiortc>=1.5.0
 silero-vad
 scipy>=1.12.1
 
+google-cloud-texttospeech
+
 # Workflow Orchestration
 yaafpy>=0.2.3 #To handle  Workflow Orchestration
 

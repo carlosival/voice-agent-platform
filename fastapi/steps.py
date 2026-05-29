@@ -22,7 +22,8 @@ from utils.tools.tool_executor import execute_tool
 
 from utils import (
     layered_has_speech,
-    call_stt_from_frames,
+    call_stt_from_frames_openai,
+    call_stt_from_frames_speaches,
     call_llm_stream_openai,
     call_tts_stream,
     pcm_to_wav,
@@ -357,7 +358,7 @@ async def stt(
                     logger.error(f"STT Debug Save Failed: {e}")
 
             # Launch Whisper as a task so we can cancel it if a StopAndClear arrives later
-            current_task = create_task(call_stt_from_frames(http_client, item))
+            current_task = create_task(call_stt_from_frames_openai(http_client, item))
             
             try:
                 transcript = await current_task
@@ -650,7 +651,7 @@ async def tts(
                 if text is None:
                     break
                 
-                gen = call_tts_stream(client, text, debug=True)
+                gen = call_tts_stream_google(text, debug=True)
                 frame_count = 0
                 
                 async for pcm_chunk in gen:

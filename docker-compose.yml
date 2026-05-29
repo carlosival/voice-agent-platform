@@ -199,6 +199,8 @@ services:
       # ── STT ────────────────────────────────────────────────────────────────
       STT_BASE_URL: ${STT_BASE_URL}
       STT_MODEL: ${STT_MODEL}
+      STT_LANGUAGE: ${STT_LANGUAGE}
+      STT_API_KEY: ${GROQ_API_KEY}
 
       # ── LLM ────────────────────────────────────────────────────────────────
       LLM_BASE_URL: ${LLM_BASE_URL}

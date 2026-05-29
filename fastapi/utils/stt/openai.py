@@ -12,7 +12,6 @@ from .helpers import pcm_to_wav, frames_to_pcm
 STT_BASE_URL = os.getenv("STT_BASE_URL",  "http://speaches:8000")
 STT_MODEL    = os.getenv("STT_MODEL",     "Systran/faster-whisper-large-v3")
 STT_LANGUAGE = os.getenv("STT_LANGUAGE",  "es")
-STT_API_KEY  = os.getenv("STT_API_KEY")
 SAMPLE_RATE  = 48000
 
 
@@ -45,7 +44,7 @@ async def call_stt_openai(http_client: AsyncClient, audio: bytes, is_wav: bool =
 
     # 1. Groq requires an Authorization header with your API key
     headers = {
-        "Authorization": f"Bearer {STT_API_KEY}"
+        "Authorization": f"Bearer {os.getenv('GROQ_API_KEY')}"
     }
 
     # 2. Adjusted URL pathing based on standard Groq/OpenAI structure
@@ -101,21 +100,13 @@ async def call_stt_speaches(http_client: AsyncClient, audio: bytes, is_wav: bool
 
 # ─── STT Call — from aiortc frames ───────────────────────────────────────────
 
-async def call_stt_from_frames_speaches(http_client: AsyncClient, frames: list[AudioFrame]) -> str:
+async def call_stt_from_frames(http_client: AsyncClient, frames: list[AudioFrame]) -> str:
     """
     Transcribe directly from a list of aiortc AudioFrames.
     Use this in your _process_audio() loop.
     """
     pcm = frames_to_pcm(frames)
-    return await call_stt_speaches(http_client, pcm, is_wav=False)
-
-async def call_stt_from_frames_openai(http_client: AsyncClient, frames: list[AudioFrame]) -> str:
-    """
-    Transcribe directly from a list of aiortc AudioFrames.
-    Use this in your _process_audio() loop.
-    """
-    pcm = frames_to_pcm(frames)
-    return await call_stt_openai(http_client, pcm, is_wav=False)
+    return await call_stt(http_client, pcm, is_wav=False)
 
 
 # ─── STT Call — streaming (SSE) ───────────────────────────────────────────────
