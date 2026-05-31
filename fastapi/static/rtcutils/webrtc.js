@@ -5,14 +5,13 @@ class WebRTCController {
     this.pc = null;
     this.audioSender = null;
     this.videoSender = null;
-    this.pendingMicTrack = null; // Mejor habilitar el microfono despues de la conexion
     this.remoteCandidatesQueue = [];
   }
 
 
-  async getWSUrl() {
+  async getWSUrl(init_URL = CONSTANTS.WS_INIT_URL) {
 
-        const response = await fetch(CONSTANTS.WS_INIT_URL, {
+        const response = await fetch(init_URL, {
         method: "POST",
         headers: {
             "Content-Type": "application/json",
@@ -24,11 +23,13 @@ class WebRTCController {
         });
 
         const data = await response.json();
-
+        localStorage.setItem("session_id", data.session_id);
+        localStorage.setItem("token", data.token);
+        localStorage.setItem("connection_url", data.connection_url);
         return data.connection_url;
-    }
+  }
 
-  // ─── CONNECT ─────────────────────────────────────────────
+  // ─── CONNECT Through WebSocket ─────────────────────────────────────────────
 
   async connect() {
 
@@ -63,13 +64,7 @@ class WebRTCController {
       const msg = JSON.parse(e.data);
       if (msg.type === "offer" || msg.type === "answer" || msg.type === "candidate") {
         await this.handleSignal(msg);
-      } else {
-        this.handleChatMessage(msg);
-      }
-      /*
-      how websocket is use for diff types of messages 
-      handler each type according to the type of message
-      */
+      } 
       window.dispatchEvent(new CustomEvent(AppEvents.WS_MESSAGE, { detail: { msg } }));
     };
 
@@ -94,12 +89,46 @@ class WebRTCController {
       return;
     }
 
-    
-
-    
-
   }
 
+
+  async connectHTTP(){
+    
+    // Get Token and URL
+    const connection_url = await this.getWSUrl(AppConfig.HTTPS_INIT_URL)
+    const token = localStorage.getItem("token");
+    const session_id = localStorage.getItem("session_id");
+
+    // 1. Fetch from your FastAPI endpoint running on your Tailscale node
+    const ice_servers_response = await fetch(AppConfig.GET_ICE_SERVERS, {
+      method: "GET",
+      headers: {
+        "Authorization": `Bearer ${token}`
+      }
+    });
+    const ice_servers = await ice_servers_response.json();
+    
+    // config contains exactly: { iceServers: [...] }
+    
+    // 2. Instantiate PeerConnection directly with the response object
+    // const pc = new RTCPeerConnection(ice_servers);
+    
+    console.log("WebRTC Peer Connection configured with Cloudflare TURN!");
+
+    const peerConfig = {
+      iceServers: ice_servers,
+      transceivers: this.setupTransceivers(),
+      handleRemoteTrack: this.handleRemoteTrack,
+      handleIceCandidate: this.handleIceCandidateOnce
+      
+      
+
+    };
+    
+    // Continue with your standard offer/answer logic...
+    this.setupPeerConnection(peerConfig);
+    
+  }
 
   disconnect() {
     
@@ -122,17 +151,16 @@ class WebRTCController {
     this.videoSender = null;
   }
 
-
-
-  // ─── SETUP PC ────────────────────────────────────────────
-
-  async setupPeerConnection() {
+  setupIceServers(ice_servers){
     this.pc = new RTCPeerConnection({
-      iceServers: [
+      iceServers: ice_servers || [
         { urls: "stun:stun.cloudflare.com:3478" },
         { urls: "stun:stun.l.google.com:19302" }
       ]
     });
+  }
+
+  setupTransceivers(){
 
     // Get the persistent track from the router
     const warmTrack = window.audioRouters.mic.getDestination().stream.getAudioTracks()[0];
@@ -150,6 +178,88 @@ class WebRTCController {
     });
 
     this.videoSender = videoTx.sender;
+  }
+    
+  handleRemoteTrack(e){
+    if (e.track.kind === "audio") {
+        console.log("🔊 received audio track");
+        // 1. Create the stream once
+        const remoteStream = new MediaStream([e.track]);
+
+        // 2. Attach to the Router first
+        window.audioRouters.remote.attachStream(remoteStream);
+
+        // 3. Then use the sink ONLY to kickstart the decoder
+        let sink = document.getElementById("remote-sink") || new Audio();
+        sink.id = "remote-sink";
+        sink.muted = true;
+        sink.srcObject = remoteStream;
+        sink.play();
+
+        console.log("📡 Decoder started via sink, stream routed to WebAudio");
+      }
+  }
+
+  handleIceCandidateTricker(e){
+    if (e.candidate) {
+      console.log("ICE Candidate:", e.candidate);
+      this.ws.send(JSON.stringify({
+        type: "candidate",
+        candidate: e.candidate
+      }));
+    }
+  }
+
+  handleIceCandidateONCE(e){
+    if (e.candidate === null) {
+        // Entire ICE gathering is complete! NOW send the payload to FastAPI
+        const finalOffer = this.pc.localDescription;
+        this.sendOfferHTTP(finalOffer);
+    }
+  }
+
+  setupOnTrack(handler){
+    this.pc.ontrack = handler;
+  }
+
+  setupOnIceCandidate(handler){
+    this.pc.onicecandidate = handler;
+  }
+
+  setupOnConnectionStateChange(handler){
+    this.pc.onconnectionstatechange = handler;
+  }
+
+  // ─── SETUP PeerConnection ────────────────────────────────────────────
+
+  async setupPeerConnection(config) {
+    
+    this.setupIceServers(config.iceServers);
+
+    this.setupTransceivers(config.transceivers);
+
+    this.setupOnTrack(handler = config.handleRemoteTrack);
+
+    this.setupOnIceCandidate(handler = config.handleIceCandidate);
+
+    this.setupOnConnectionStateChange(handler = config.handleConnectionStateChange);
+
+    // Get the persistent track from the router
+    //const warmTrack = window.audioRouters.mic.getDestination().stream.getAudioTracks()[0];
+
+    // Add the transceiver with the WARM track
+    //const audioTx = this.pc.addTransceiver(warmTrack, {
+    //  direction: "sendrecv"
+    //});
+
+    //this.audioSender = audioTx.sender;
+
+    // 📹 VIDEO transceiver 
+    //const videoTx = this.pc.addTransceiver("video", {
+    //  direction: "sendonly"
+    //});
+
+    //this.videoSender = videoTx.sender;
 
     // ─── RECEIVE TRACKS ─────────────────────────
 
@@ -206,13 +316,41 @@ class WebRTCController {
 
     };
 
-    if (this.pendingMicTrack) {
-      await this.setMicTrack(this.pendingMicTrack);
-      this.pendingMicTrack = null;
-    }
   }
 
   // ─── SIGNALING ───────────────────────────────────────────
+ 
+  async createOffer(){
+    const offer = await this.pc.createOffer({
+      // FORCE the browser to act as a listener in the SDP
+      offerToReceiveAudio: true,
+      offerToReceiveVideo: false
+    });
+
+    await this.pc.setLocalDescription(offer);
+  
+  }
+
+  async sendOfferWebSocket(){
+    if (this.ws?.readyState === WebSocket.OPEN) {
+      this.ws.send(JSON.stringify(this.pc.localDescription));
+    }
+  }
+
+  async sendOfferHTTP(offer, token = null){
+    const response = await fetch(AppConfig.API_BASE_URL + "/api/offer", {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${token ||localStorage.getItem("token")}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(this.pc.localDescription)
+    });
+    const data = await response.json();
+    // data is the answer from the server, Accept it
+    await this.pc.setRemoteDescription(data);
+  }
+
 
   async createAndSendOffer() {
     const offer = await this.pc.createOffer({
@@ -263,6 +401,30 @@ class WebRTCController {
         }));
     } catch (error) {
       console.error("Error handling UI message:", error);
+    }
+  }
+
+  handleICEWebsocket(e) {
+    // Handle ICE through WebSocket and Trickle ICE
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      this.ws.send(JSON.stringify({
+        type: "candidate",
+        candidate: e.candidate
+      }));
+    } else {
+      console.log("⏳ ICE candidate gathered, but signaling WebSocket is already closed. Skipping trickle.");
+    }
+  }
+
+  handleICEAllOnce(e) {
+    // Handle ICE through WebSocket and Trickle ICE
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      this.ws.send(JSON.stringify({
+        type: "candidate",
+        candidate: e.candidate
+      }));
+    } else {
+      console.log("⏳ ICE candidate gathered, but signaling WebSocket is already closed. Skipping trickle.");
     }
   }
 
