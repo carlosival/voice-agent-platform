@@ -1,14 +1,21 @@
 import os
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, status
 import redis
 import jwt
 import datetime
 import httpx
+from pydantic import BaseModel, Field
+from typing import Optional
 
 router = APIRouter()
 
 CLOUDFLARE_ACCOUNT_ID = os.getenv("CLOUDFLARE_ACCOUNT_ID")
 CLOUDFLARE_API_TOKEN = os.getenv("CLOUDFLARE_API_TOKEN")
+DOMAIN = os.getenv("DOMAIN")
+
+ALGORITHM = "HS256"
+TOKEN_EXPIRATION_SECONDS = 60
+SECRET_KEY = "1234567890"
 
 if not CLOUDFLARE_ACCOUNT_ID or not CLOUDFLARE_API_TOKEN:
     raise RuntimeError("Missing Cloudflare Environment Variables!")
@@ -100,7 +107,7 @@ class WebRTCOffer(BaseModel):
     sdp: str
     type: str
 
-@app.post("/api/handshake/{session_id}")
+@router.post("/api/handshake/{session_id}")
 async def WebRTC_handshake(session_id: str, offer: WebRTCOffer):
     # 1. Format the offer data payload
     payload = {
@@ -130,11 +137,7 @@ async def WebRTC_handshake(session_id: str, offer: WebRTCOffer):
         await pubsub.unsubscribe(f"webrtc:answer:{session_id}")
 
 
-DOMAIN = os.getenv("DOMAIN")
 
-ALGORITHM = "HS256"
-TOKEN_EXPIRATION_SECONDS = 60
-SECRET_KEY = "1234567890"
 
 # ── REQUEST/RESPONSE SCHEMAS ────────────────────────────────────────
 class SessionInitializeRequest(BaseModel):

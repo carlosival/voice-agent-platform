@@ -1,9 +1,11 @@
 const BASE_URL = window.location.origin;
-const WS_INIT_URL    = `${BASE_URL}/ws/v1/sessions/initialize`;
+const INIT_URL = `${BASE_URL}/api/v1/sessions/initialize`;
+const GET_ICE_SERVERS = `${BASE_URL}/api/v1/ice-servers`;
 
 const CONSTANTS = Object.freeze({
     BASE_URL: BASE_URL,
-    WS_INIT_URL: WS_INIT_URL
+    INIT_URL: INIT_URL,
+    GET_ICE_SERVERS: GET_ICE_SERVERS
 });
 
 const AppEvents = Object.freeze({
@@ -18,6 +20,14 @@ const AppEvents = Object.freeze({
     // WebRTC Events
     RTC_STATECHANGE: 'rtc:statechange',
     RTC_CONNECTED: 'rtc:connected',
+    RTC_DISCONNECTED: 'rtc:disconnected',
+    RTC_FAILED: 'rtc:failed',
+    RTC_CLOSED: 'rtc:closed',
+    RTC_ERROR: 'rtc:error',
+    RTC_OFFER_SENT: 'rtc:offer:sent',
+    RTC_ANSWER_RECEIVED: 'rtc:answer:received',
+    RTC_CANDIDATE_SENT: 'rtc:candidate:sent',
+    RTC_CANDIDATE_RECEIVED: 'rtc:candidate:received',
 
     // Microphone Events
     MIC_READY: 'mic:ready',

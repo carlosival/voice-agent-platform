@@ -31,7 +31,7 @@ class WebRTCController {
 
   // ─── CONNECT Through WebSocket ─────────────────────────────────────────────
 
-  async connect() {
+  async connectWebSocket() {
 
     // 1. Clean up existing connection if it exists
     if (this.ws) {
@@ -47,7 +47,8 @@ class WebRTCController {
     }
 
     try {
-      this.wsUrl = await this.getWSUrl();
+      await this.getWSUrl(CONSTANTS.INIT_URL);
+      this.wsUrl = localStorage.getItem("connection_url");
       console.log("WebSocket URL:", this.wsUrl);
       // 2. Create new WebSocket connection
       this.ws = new WebSocket(this.wsUrl);
@@ -95,12 +96,12 @@ class WebRTCController {
   async connectHTTP(){
     
     // Get Token and URL
-    const connection_url = await this.getWSUrl(AppConfig.HTTPS_INIT_URL)
+    const connection_url = await this.getWSUrl(CONSTANTS.INIT_URL)
     const token = localStorage.getItem("token");
     const session_id = localStorage.getItem("session_id");
 
-    // 1. Fetch from your FastAPI endpoint running on your Tailscale node
-    const ice_servers_response = await fetch(AppConfig.GET_ICE_SERVERS, {
+    // 1. Fetch from your server endpoint
+    const ice_servers_response = await fetch(CONSTANTS.GET_ICE_SERVERS, {
       method: "GET",
       headers: {
         "Authorization": `Bearer ${token}`
@@ -117,11 +118,9 @@ class WebRTCController {
 
     const peerConfig = {
       iceServers: ice_servers,
-      transceivers: this.setupTransceivers(),
       handleRemoteTrack: this.handleRemoteTrack,
-      handleIceCandidate: this.handleIceCandidateOnce
-      
-      
+      handleIceCandidate: this.handleIceCandidateONCE,
+      handleConnectionStateChange: this.handleConnectionStateChange
 
     };
     
@@ -203,6 +202,7 @@ class WebRTCController {
   handleIceCandidateTricker(e){
     if (e.candidate) {
       console.log("ICE Candidate:", e.candidate);
+      // Send candidate to the other peer via WebSocket or HTTP
       this.ws.send(JSON.stringify({
         type: "candidate",
         candidate: e.candidate
@@ -210,11 +210,38 @@ class WebRTCController {
     }
   }
 
-  handleIceCandidateONCE(e){
+  async handleIceCandidateONCE(e){
     if (e.candidate === null) {
-        // Entire ICE gathering is complete! NOW send the payload to FastAPI
-        const finalOffer = this.pc.localDescription;
-        this.sendOfferHTTP(finalOffer);
+        // The complete ice gathering is done when the candidate is null
+        // Entire ICE gathering is complete! 
+        // Create Offer
+        // Send the offer as payload to Server.
+        // Get the answer from the server and set it as the remote description.
+        // Is stored in the localDescription
+        await this.createOffer();
+        await this.sendOfferAndSetAnswerHTTP();
+        
+    }
+  }
+
+  async handleConnectionStateChange(e){
+    {
+      console.log("WEBRTC state:", this.pc.connectionState);
+
+      window.dispatchEvent(new CustomEvent(AppEvents.RTC_STATECHANGE, {
+        detail: { state: this.pc.connectionState }
+      }));
+
+
+      if (this.pc.connectionState === "connected") {
+        // Auto-enable mic when connection is established
+        window.dispatchEvent(new CustomEvent(AppEvents.RTC_CONNECTED));
+      }
+      // Don't try to reconnect on failure, the user will handle it button
+      if (this.pc.connectionState === "failed" || this.pc.connectionState === "closed") {
+        this.disconnect();
+      };
+
     }
   }
 
@@ -234,87 +261,15 @@ class WebRTCController {
 
   async setupPeerConnection(config) {
     
-    this.setupIceServers(config.iceServers);
+      this.setupIceServers(config.iceServers);
 
-    this.setupTransceivers(config.transceivers);
+      this.setupTransceivers();
 
-    this.setupOnTrack(handler = config.handleRemoteTrack);
+      this.setupOnTrack(handler = config.handleRemoteTrack);
 
-    this.setupOnIceCandidate(handler = config.handleIceCandidate);
+      this.setupOnIceCandidate(handler = config.handleIceCandidate);
 
-    this.setupOnConnectionStateChange(handler = config.handleConnectionStateChange);
-
-    // Get the persistent track from the router
-    //const warmTrack = window.audioRouters.mic.getDestination().stream.getAudioTracks()[0];
-
-    // Add the transceiver with the WARM track
-    //const audioTx = this.pc.addTransceiver(warmTrack, {
-    //  direction: "sendrecv"
-    //});
-
-    //this.audioSender = audioTx.sender;
-
-    // 📹 VIDEO transceiver 
-    //const videoTx = this.pc.addTransceiver("video", {
-    //  direction: "sendonly"
-    //});
-
-    //this.videoSender = videoTx.sender;
-
-    // ─── RECEIVE TRACKS ─────────────────────────
-
-    this.pc.ontrack = (e) => {
-      if (e.track.kind === "audio") {
-        console.log("🔊 received audio track");
-        // 1. Create the stream once
-        const remoteStream = new MediaStream([e.track]);
-
-        // 2. Attach to the Router first
-        window.audioRouters.remote.attachStream(remoteStream);
-
-        // 3. Then use the sink ONLY to kickstart the decoder
-        let sink = document.getElementById("remote-sink") || new Audio();
-        sink.id = "remote-sink";
-        sink.muted = true;
-        sink.srcObject = remoteStream;
-        sink.play();
-
-        console.log("📡 Decoder started via sink, stream routed to WebAudio");
-      }
-    };
-
-    // ─── ICE ─────────────────────────
-
-    this.pc.onicecandidate = (e) => {
-      // Check if the WebSocket is actually open before trying to send
-    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-      this.ws.send(JSON.stringify({
-        type: "candidate",
-        candidate: e.candidate
-      }));
-    } else {
-      console.log("⏳ ICE candidate gathered, but signaling WebSocket is already closed. Skipping trickle.");
-    }
-    };
-
-    this.pc.onconnectionstatechange = () => {
-      console.log("WEBRTC state:", this.pc.connectionState);
-
-      window.dispatchEvent(new CustomEvent(AppEvents.RTC_STATECHANGE, {
-        detail: { state: this.pc.connectionState }
-      }));
-
-
-      if (this.pc.connectionState === "connected") {
-        // Auto-enable mic when connection is established
-        window.dispatchEvent(new CustomEvent(AppEvents.RTC_CONNECTED));
-      }
-      // Don't try to reconnect on failure, the user will handle it button
-      if (this.pc.connectionState === "failed" || this.pc.connectionState === "closed") {
-        this.disconnect();
-      };
-
-    };
+      this.setupOnConnectionStateChange(handler = config.handleConnectionStateChange);
 
   }
 
@@ -337,11 +292,12 @@ class WebRTCController {
     }
   }
 
-  async sendOfferHTTP(offer, token = null){
+  async sendOfferAndSetAnswerHTTP(){
+    const token = localStorage.getItem("token") || null;
     const response = await fetch(AppConfig.API_BASE_URL + "/api/offer", {
       method: "POST",
       headers: {
-        "Authorization": `Bearer ${token ||localStorage.getItem("token")}`,
+        "Authorization": `Bearer ${token}`,
         "Content-Type": "application/json"
       },
       body: JSON.stringify(this.pc.localDescription)
@@ -352,7 +308,7 @@ class WebRTCController {
   }
 
 
-  async createAndSendOffer() {
+  async createAndSendOfferWebSocket() {
     const offer = await this.pc.createOffer({
       // FORCE the browser to act as a listener in the SDP
       offerToReceiveAudio: true,
@@ -415,7 +371,7 @@ class WebRTCController {
       console.log("⏳ ICE candidate gathered, but signaling WebSocket is already closed. Skipping trickle.");
     }
   }
-
+  /*
   handleICEAllOnce(e) {
     // Handle ICE through WebSocket and Trickle ICE
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
@@ -427,7 +383,7 @@ class WebRTCController {
       console.log("⏳ ICE candidate gathered, but signaling WebSocket is already closed. Skipping trickle.");
     }
   }
-
+*/
   async handleSignal(msg) {
     try {
       if (msg.type === "answer" || msg.type === "offer") {

@@ -14,13 +14,21 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Python deps
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+COPY fastapi/requirements.txt .
 
-COPY . .
+# Upgrading pip first handles large wheel extractions much more efficiently
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir -r requirements.txt
+
+# Copy the shared folder and the API gateway application
+COPY dbs_clients/ ./dbs_clients/
+COPY fastapi/ ./fastapi/ 
 
 # static dir might not exist yet — create it, don't COPY it
 RUN mkdir -p ./static
+
+# Updated to match the new workdir path
+ENV PYTHONPATH="/app"
 
 EXPOSE 8080
 

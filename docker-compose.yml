@@ -168,8 +168,8 @@ services:
   # ──────────────────────────────────────────────────────────────────────────
   fastapi:
     build:
-      context: ./fastapi
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: fastapi/Dockerfile
     image: voice-fastapi:latest
     container_name: fastapi
     restart: unless-stopped
@@ -228,6 +228,56 @@ services:
       retries: 5
       start_period: 15s
 
+
+  gateway:
+    build:
+      context: .
+      dockerfile: gateway/Dockerfile
+    image: voice-gateway:latest
+    container_name: gateway
+    restart: unless-stopped
+    ports:
+      - "8081:8081"
+    environment:
+      
+      # BASE_URL is auto-resolved from ngrok at runtime (see ngrok service)
+      DOMAIN: ${DOMAIN}
+      # Override here only if using a static domain: BASE_URL: https://yourdomain.com
+      NGROK_API_URL: http://ngrok:4040/api/tunnels
+      # Internal service URLs (Docker network DNS)
+
+      # ── Database ──────────────────────────────────────────────────────────
+      POSTGRES_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}
+      POSTGRES_HOST: ${POSTGRES_HOST}
+      POSTGRES_PORT: ${POSTGRES_PORT}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+
+      # ── Redis ──────────────────────────────────────────────────────────
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/${REDIS_DB}
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      REDIS_DB: ${REDIS_DB}    
+
+      # ── Cloudflare ──────────────────────────────────────────────────────────
+      CLOUDFLARE_API_TOKEN: ${CLOUDFLARE_API_TOKEN}
+      CLOUDFLARE_ACCOUNT_ID: ${CLOUDFLARE_ACCOUNT_ID}
+
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - ai-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health/ping"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+
   # ──────────────────────────────────────────────────────────────────────────
   # 4. ngrok — exposes FastAPI publicly so Twilio can reach webhooks
   # ──────────────────────────────────────────────────────────────────────────
@@ -254,20 +304,54 @@ services:
     volumes:
       - redis_data:/data
     restart: unless-stopped
-    command: ["redis-server", "--save", "60", "1", "--loglevel", "warning", "--requirepass", "your_strong_password",]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    command: ["redis-server", "--save", "60", "1", "--loglevel", "warning", "--requirepass", "${REDIS_PASSWORD}"]
 
   postgres:
     image: postgres:15-alpine
     container_name: postgres
     ports:
-      - "5432:5432"
+      - "${POSTGRES_PORT}:5432"
     environment:
-      - POSTGRES_USER=myuser
-      - POSTGRES_PASSWORD=mypassword
-      - POSTGRES_DB=voice_agent
+      POSTGRES_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}
+      POSTGRES_HOST: ${POSTGRES_HOST}
+      POSTGRES_PORT: ${POSTGRES_PORT}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
     restart: unless-stopped
   
 
-  
+  init_db:
+    build:
+      context: .
+      dockerfile: gateway/Dockerfile
+    volumes:
+      - ./gateway:/app/gateway 
+    command: python /app/gateway/db/init.db.py
+    depends_on:
+      - postgres
+    environment:
+      # ─── ADD THIS LINE TO FIX THE PATH ERROR ───
+      PYTHONPATH: /app
+    
+      POSTGRES_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}
+      POSTGRES_HOST: ${POSTGRES_HOST}
+      POSTGRES_PORT: ${POSTGRES_PORT}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+       # ── Cloudflare ──────────────────────────────────────────────────────────
+      CLOUDFLARE_API_TOKEN: ${CLOUDFLARE_API_TOKEN}
+      CLOUDFLARE_ACCOUNT_ID: ${CLOUDFLARE_ACCOUNT_ID}

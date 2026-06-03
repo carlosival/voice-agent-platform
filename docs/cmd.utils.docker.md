@@ -18,3 +18,7 @@ docker compose up -d
 
 # Stop a project
 docker compose down
+
+# See docker containers's inside folder structure
+docker compose run --rm {container_name} find . -maxdepth 3
+
