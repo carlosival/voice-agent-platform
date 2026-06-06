@@ -1,16 +1,22 @@
+import json
+import asyncio
+import logging
+from fastapi import APIRouter, HTTPException, Request, status
+from pydantic import BaseModel
 
-
-
-# Connects to your Redis instance over your local network/Tailscale
-redis_client = redis.Redis(host='localhost', port=6379, decode_responses=True)
+router = APIRouter()
+logger = logging.getLogger(__name__)
 
 class WebRTCOffer(BaseModel):
     sdp: str
     type: str
 
-@app.post("/api/offer")
-async def WebRTC_handshake(offer: WebRTCOffer):
-    # From SLT get all session info
+@router.post("/initiate/{session_id}")
+async def WebRTC_handshake(session_id: str, offer: WebRTCOffer, request: Request):
+    """
+    Handle WebRTC handshake by publishing the offer to Redis and waiting for an answer.
+    """
+    redis_client = request.app.state.redis
 
     # 1. Format the offer data payload
     payload = {
@@ -19,7 +25,6 @@ async def WebRTC_handshake(offer: WebRTCOffer):
         "sdp": offer.sdp
     }
     
-
     # 2. Setup a Pub/Sub listener to wait specifically for this session's answer
     pubsub = redis_client.pubsub()
     await pubsub.subscribe(f"webrtc:answer:{session_id}")
@@ -36,6 +41,8 @@ async def WebRTC_handshake(offer: WebRTCOffer):
                     answer_data = json.loads(message["data"])
                     return answer_data
     except asyncio.TimeoutError:
+        logger.error(f"Handshake timeout for session {session_id}")
         raise HTTPException(status_code=504, detail="Media worker timeout.")
     finally:
         await pubsub.unsubscribe(f"webrtc:answer:{session_id}")
+        await pubsub.close()

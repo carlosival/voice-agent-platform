@@ -20,6 +20,17 @@ from utils.tools.tools import EndConversationTool
 logger = logging.getLogger(__name__)
 active_connections = set()
 
+# INPUT of CREATE PEER Connection
+class PeerDependencies:
+    audio_handler: Callable[[track], None]
+    video_handler: Callable[[track], None]
+    data_handler: Callable[[track], None]
+    on_connected_fully: Callable[[], None] =lambda: ws.close(code=1000),  # ← WebSocket callback  
+    on_track: Callable[[track], None]
+    on_ice_state_change: Callable[[str], None] = lambda state: logger.info(f"ICE state: {state}"),
+    on_connection_state_change: Callable[[str], None] = lambda state: logger.info(f"Connection state: {state}")
+
+# OUTPUT CREATE PEER Connection
 class PeerSession:
     def __init__(self):
         self.pc = None
@@ -101,7 +112,7 @@ async def create_peer(ws: WebSocket):
             logger.error("ICE failed — no valid path found")
         if peer_session.pc.iceConnectionState in ["connected", "completed"]:
             logger.info("ICE connected")
-            if peer_session.pc.connectionState == "connected":
+            if peer_session.pc.connectionState == "connected": # A fully established connection
                 logger.info("PeerConnection established — closing WebSocket")
                 await ws.close(code=1000)
 
@@ -119,7 +130,7 @@ async def create_peer(ws: WebSocket):
         
         if peer_session.pc.connectionState in ["connected", "completed"]:
             logger.info("PeerConnection established")
-            if peer_session.pc.iceConnectionState in ["connected", "completed"]:
+            if peer_session.pc.iceConnectionState in ["connected", "completed"]: # A fully established connection
                 logger.info("PeerConnection and ICE connected — closing WebSocket")
                 await ws.close(code=1000)
 

@@ -1,54 +1,70 @@
-from fastapi import FastAPI, HTTPException, Request
+import os
+import logging
+from contextlib import asynccontextmanager
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-import uuid
-import jwt
-import datetime
-import redis
 
-app = FastAPI()
 
-# Configurar CORS
+# Import routers
+from gateway.routes.init_session import router as init_router
+from gateway.routes.handshake import router as handshake_router
+from gateway.routes.ice_servers import router as ice_router
+
+# Import DB
+from dbs_clients.db import AsyncSessionFactory, async_engine
+
+# Import Redis
+from dbs_clients.redis_db import redis_client
+
+# Setup logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+)
+logger = logging.getLogger(__name__)
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # --- Startup ---
+    logger.info("Initializing Gateway dependencies...")
+    
+    # 1. Initialize Redis
+    app.state.redis = redis_client
+    
+    # 2. Store DB Session Maker
+    app.state.db = AsyncSessionFactory
+    
+    yield
+    
+    # --- Shutdown ---
+    logger.info("Cleaning up Gateway dependencies...")
+    await app.state.redis.aclose()
+    await async_engine.dispose()
+
+app = FastAPI(
+    title="Voice Agent Gateway",
+    description="Regional gateway for secure session initialization and WebRTC handshake routing.",
+    version="1.0.0",
+    lifespan=lifespan
+)
+
+# Configure CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["*"], # In production, restrict this to your frontend domains
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Conectar a Redis
-redis_client = redis.StrictRedis(host='localhost', port=6379, db=0, decode_responses=True)
+# Register Routers
+app.include_router(init_router, tags=["Session"])
+app.include_router(handshake_router, prefix="/api", tags=["WebRTC"])
+app.include_router(ice_router, prefix="/api", tags=["WebRTC"])
 
-# Endpoint para inicializar sesión
-@app.post("/session/init")
-async def initialize_session(request: Request):
-    data = await request.json()
-    user_id = data.get("user_id")
-    if not user_id:
-        raise HTTPException(status_code=400, detail="user_id es requerido")
-
-    # Generar session_id
-    session_id = str(uuid.uuid4())
-    
-    # Generar token JWT
-    token_payload = {
-        "session_id": session_id,
-        "user_id": user_id,
-        "exp": datetime.datetime.utcnow() + datetime.timedelta(seconds=60)
-    }
-    token = jwt.encode(token_payload, "secret_key", algorithm="HS256")
-    
-    # Guardar token en Redis
-    redis_client.set(f"valid_tokens:{token}", session_id, ex=60)
-    
-    # Devolver URL de conexión
-    connection_url = f"wss://worker-{session_id}.internal.yourdomain.com:8443/ws"
-    
-    return {
-        "session_id": session_id,
-        "connection_url": connection_url,
-        "token": token
-    }
+@app.get("/health/ping")
+async def ping():
+    return {"status": "ok", "service": "gateway"}
 
 @app.get("/")
 def read_root():

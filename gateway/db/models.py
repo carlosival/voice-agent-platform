@@ -23,6 +23,12 @@ class UserAgentAssociation(Base):
     # Optional: If a user wants to override a specific prompt setting on a generic agent
     custom_config_override: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True) # {"business_name": "Acme Corp"}
     
+    # Tier tells you wich hardware and compliance the agent you be deployed in
+    tier: Mapped[str] = mapped_column(String(50), default="free")
+
+    # Region tells you which part of the world the agent you be deployed in
+    region: Mapped[str] = mapped_column(String(50), default="global")
+
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
 
     # Relationships
@@ -39,7 +45,6 @@ class User(Base):
     
     # Relationships
     public_keys: Mapped[List["UserPublicKey"]] = relationship(back_populates="user", cascade="all, delete-orphan")
-    agent_associations: Mapped[List["UserAgentAssociation"]] = relationship(back_populates="user", cascade="all, delete-orphan")
 
 
 class UserPublicKey(Base):
@@ -55,6 +60,8 @@ class UserPublicKey(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
     
     user: Mapped["User"] = relationship(back_populates="public_keys")
+
+    agent_associations: Mapped[List["UserAgentAssociation"]] = relationship(back_populates="public_key", cascade="all, delete-orphan")
 
     __table_args__ = (
         Index("idx_public_keys_user_id", "user_id"),

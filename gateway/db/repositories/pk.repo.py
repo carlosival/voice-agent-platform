@@ -2,7 +2,7 @@ import logging
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_
 from typing import Optional
-from db.models import UserPublicKey
+from gateway.db.models import UserPublicKey
 
 logger = logging.getLogger(__name__)
 
@@ -22,9 +22,9 @@ class PKRepository:
                         UserPublicKey.allowed_domains.any(client_origin)
                     )
                 )
-                key_record = await self.db.execute(stmt).scalar_one_or_none()
+                public_key_record = await self.db.execute(stmt).one_or_none()
 
-                return key_record
+                return public_key_record
         except Exception as e:
             logger.error(f"Error checking PK: {e}")
             return None
