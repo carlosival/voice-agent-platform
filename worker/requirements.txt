@@ -1,0 +1,26 @@
+fastapi>=0.111.0
+uvicorn[standard]>=0.29.0
+python-multipart>=0.0.9
+httpx>=0.27.0
+twilio>=9.0.0
+python-dotenv>=1.0.0
+soundfile>=0.12.1
+aiortc>=1.5.0
+
+silero-vad
+scipy>=1.12.1
+
+google-cloud-texttospeech
+
+# Redis
+redis>=5.0.0
+
+# Workflow Orchestration
+yaafpy>=0.2.3 #To handle  Workflow Orchestration
+
+# Tools Calling
+smolagents>=1.24.0 # https://github.com/smol-ai/smolagent To handle tool calling
+openai>=1.0.0
+
+# Observability
+langfuse>=3.168.0

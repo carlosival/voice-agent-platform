@@ -90,7 +90,6 @@ async def create_peer(ws: WebSocket):
             "output_track": output_track,
             "http_client": ws.app.state.http,
             "tracer": ws.app.state.tracer,
-            "peer_connection": pc,
         }
     })
 
