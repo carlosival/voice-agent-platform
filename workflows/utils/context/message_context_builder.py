@@ -24,7 +24,7 @@ def _extract_messages(self, messages: list) -> str:
             logger.error(f"Error building context: {e}")
             return ""
 
-def _build_chat_messages(messages: list) -> list:
+def build_chat_messages(messages: list) -> list:
     """
     Build a list of message objects for the OpenAI-compatible Chat API.
     """
@@ -43,7 +43,7 @@ def _build_chat_messages(messages: list) -> list:
     return chat_history
 
 
-def _build_context(messages: list) -> str:
+def context_from_messages(messages: list) -> str:
     """Build full prompt for LLM from system prompt and messages"""
     return f"{system_prompt}\n\n{_extract_messages(messages)}"
    

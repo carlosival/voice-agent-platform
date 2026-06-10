@@ -1,19 +1,22 @@
-fastapi>=0.111.0
-uvicorn[standard]>=0.29.0
+
+
 python-multipart>=0.0.9
 httpx>=0.27.0
-twilio>=9.0.0
 python-dotenv>=1.0.0
 soundfile>=0.12.1
 aiortc>=1.5.0
-
+async-lru>=2.0.0
 silero-vad
 scipy>=1.12.1
 
 google-cloud-texttospeech
 
-# Redis
-redis>=5.0.0
+
+# ─── DATABASE & ORM ───
+sqlalchemy==2.0.30
+asyncpg==0.29.0
+# Redis for distributed offer/answer exchange and Redis Ledger for Workers state management
+redis==5.0.4
 
 # Workflow Orchestration
 yaafpy>=0.2.3 #To handle  Workflow Orchestration

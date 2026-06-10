@@ -5,22 +5,22 @@ from aiortc.mediastreams import MediaStreamError, MediaStreamTrack
 from typing import AsyncGenerator
 from asyncio import gather, Queue, Event, QueueEmpty, ensure_future, CancelledError, create_task, wait_for, sleep, timeout, TimeoutError, CancelledError
 from collections import deque
-from audio_track import AudioOutputTrack
-from signals import StartSpeaking, EndSpeaking, EndOfStream, AskUserStillThere, WarmUp, SignalFrame
+from workflows.audio_track import AudioOutputTrack
+from workflows.signals import StartSpeaking, EndSpeaking, EndOfStream, AskUserStillThere, WarmUp, SignalFrame
 import logging
 import wave, uuid, os 
 import numpy as np
 import json
 from enum import Enum
 import httpx
-from utils import InMemoryMemory, _build_chat_messages
-logger = logging.getLogger(__name__)
+from workflows.utils.memory import InMemoryMemory
+from workflows.utils.context import build_chat_messages
+
 from smolagents.models import get_tool_json_schema
 from smolagents import Tool
-from utils.tools.tool_types import ToolCallChunk
-from utils.tools.tool_executor import execute_tool
+from workflows.utils.tools import ToolCallChunk, execute_tool
 
-from utils import (
+from workflows.utils import (
     layered_has_speech,
     call_stt_from_frames_openai,
     call_stt_from_frames_speaches,
@@ -31,6 +31,9 @@ from utils import (
     silero_has_speech_from_numpy,
     frames_to_mono_int16
 )
+
+
+logger = logging.getLogger(__name__)
 
 class VADState(Enum):
     QUIET    = 1
@@ -402,7 +405,7 @@ async def llm_stream(
     async def llm_stream_worker(text, sentence_queue):
         token_count = 0
         buffer = ""
-        messages = _build_chat_messages(await message_history.get_messages())
+        messages = build_chat_messages(await message_history.get_messages())
         tools_schema = [get_tool_json_schema(t) for t in tools.values()]
         tool_calls_acc: dict[int, dict] = {}
         try:
@@ -651,7 +654,7 @@ async def tts(
                 if text is None:
                     break
                 
-                gen = call_tts_stream_google(text, debug=True)
+                gen = call_tts_stream(text, debug=True)
                 frame_count = 0
                 
                 async for pcm_chunk in gen:

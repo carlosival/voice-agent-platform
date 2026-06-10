@@ -1,11 +1,10 @@
 import os
 import logging
 import httpx
-from fastapi import APIRouter, HTTPException, status
 from async_lru import alru_cache
 
 logger = logging.getLogger(__name__)
-router = APIRouter()
+
 
 CLOUDFLARE_ACCOUNT_ID = os.getenv("CLOUDFLARE_ACCOUNT_ID")
 CLOUDFLARE_API_TOKEN = os.getenv("CLOUDFLARE_API_TOKEN")

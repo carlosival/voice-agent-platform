@@ -4,18 +4,16 @@ import logging
 import os
 import signal
 import uuid
-from dataclasses import dataclass
 
-import httpx
 from aiortc import RTCPeerConnection, RTCSessionDescription
 from redis.asyncio import Redis
 
-from peer.config import build_rtc_config
-from peer.context import build_context
+
 from peer.factory import create_peer
-from peer.types import PeerDependencies, PeerSession
-from pipelines import audio_pipeline
-from worker.deps.provider import DepProvider
+from peer.config import build_rtc_config
+from peer.types import PeerSession
+
+from deps_provider import DepProvider
 
 #This worker use channels for exchange offer/answer WebRTC
 from dbs_clients import redis_client
@@ -27,19 +25,22 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # ── Config ────────────────────────────────────────────────────────────────────
-TIER = os.getenv("TIER", "standard")
-REGION = os.getenv("REGION", "eu-west")
+TIER = os.getenv("TIER")
+REGION = os.getenv("REGION")
 WORKER_ID = os.getenv("WORKER_ID", f"worker-{uuid.uuid4()}")
 MAX_CONCURRENT = int(os.getenv("MAX_CONCURRENT_SESSIONS", 50))
+CLOUDFLARE_ACCOUNT_ID = os.getenv("CLOUDFLARE_ACCOUNT_ID")
+CLOUDFLARE_API_TOKEN = os.getenv("CLOUDFLARE_API_TOKEN")
 
 STREAM_KEY = f"webrtc:offers:{TIER}:{REGION}"
 GROUP_NAME = f"{TIER}-{REGION}-workers"
 
 # ── Validate required env ─────────────────────────────────────────────────────
 _required = {
-    "CLOUDFLARE_ACCOUNT_ID": os.getenv("CLOUDFLARE_ACCOUNT_ID"),
-    "CLOUDFLARE_API_TOKEN": os.getenv("CLOUDFLARE_API_TOKEN"),
-    "REDIS_URL": os.getenv("REDIS_URL"),
+    "CLOUDFLARE_ACCOUNT_ID": CLOUDFLARE_ACCOUNT_ID,
+    "CLOUDFLARE_API_TOKEN": CLOUDFLARE_API_TOKEN,
+    "TIER": TIER,
+    "REGION": REGION,
 }
 _missing = [k for k, v in _required.items() if not v]
 if _missing:
@@ -211,9 +212,9 @@ async def process_offer(
 async def startup() -> None:
     logger.info(f"Worker {WORKER_ID} starting — tier={TIER} region={REGION}")
 
-    await ensure_group(app_state.redis)
+    await ensure_group(redis_client)
 
-    # Warm ICE cache
+    # Warm ICE serverscache
     try:
         await build_rtc_config()
         logger.info("ICE server cache warmed.")
@@ -255,17 +256,18 @@ async def main() -> None:
     # Signal handling
     loop = asyncio.get_running_loop()
     for sig in (signal.SIGINT, signal.SIGTERM):
+        # add signal handler for SIGINT and SIGTERM to set stop event
         loop.add_signal_handler(sig, stop_event.set)
 
     # Background tasks
-    asyncio.create_task(report_load(app_state.redis, stop_event))
-    asyncio.create_task(reclaim_abandoned(app_state.redis, stop_event))
+    asyncio.create_task(report_load(redis_client, stop_event))
+    asyncio.create_task(reclaim_abandoned(redis_client, stop_event))
 
     try:
         while not stop_event.is_set():
             try:
                 batch_size = get_batch_size()
-                messages = await app_state.redis.xreadgroup(
+                messages = await redis_client.xreadgroup(
                     GROUP_NAME,
                     WORKER_ID,
                     {STREAM_KEY: ">"},

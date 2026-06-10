@@ -2,7 +2,7 @@ import json
 import asyncio
 from typing import TypedDict, Dict
 from smolagents import Tool, PythonInterpreterTool, FinalAnswerTool
-from utils.tools.tool_types import ToolCallChunk
+from .tool_types import ToolCallChunk
 # Registry: name → async callable
 TOOL_REGISTRY: dict[str, Tool] = {}
 

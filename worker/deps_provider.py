@@ -1,22 +1,18 @@
 from yaafpy import ExecContext
 from peer.types import PeerDependencies
 from pipelines import audio_pipeline
-from tools.tools import EndConversationTool
-from memory.in_memory import InMemoryMemory
+from workflows.utils.tools import EndConversationTool
+from workflows.utils.memory import InMemoryMemory
+from workflows.utils.observavility import get_tracer
 from httpx import AsyncClient
+from workflows import AudioOutputTrack
 import time
+import os
 
 
 end_conversation_tool = EndConversationTool()
-memory = InMemoryMemory()
-output_track = None
 http_client = AsyncClient(timeout=60.0)
-tracer = Langfuse(
-        public_key=os.getenv("LANGFUSE_PUBLIC_KEY"),
-        secret_key=os.getenv("LANGFUSE_SECRET_KEY"),
-        host=os.getenv("LANGFUSE_HOST"),
-        httpx_client=http_client
-    )
+tracer = get_tracer(http_client)
 
 class DepProvider:
     def __init__(self):
@@ -24,7 +20,8 @@ class DepProvider:
 
     def build(self, session_id: str) -> PeerDependencies:
 
-        
+        # Generate a deterministic ID based on a seed
+        session_trace_id = tracer.create_trace_id(seed=session_id)
 
         ctx = ExecContext(shared_data={
             "tools": {f"{end_conversation_tool.name}": end_conversation_tool},
@@ -37,14 +34,24 @@ class DepProvider:
             "metadata": {
                 "token_usage": 0,
             },
-            "message_history": memory,
+            "message_history": InMemoryMemory(),
             "resources": {
-                "output_track": output_track,
+                "output_track": AudioOutputTrack(),
                 "http_client": http_client,
                 "tracer": tracer,
+                "pc": None, # Will be set when the peer is created
             }
         })
+
+        def on_connected_fully(pc: RTCPeerConnection) -> None:
+            ctx.shared_data["resources"]["pc"]
+
+        def on_terminated(pc: RTCPeerConnection) -> None:
+            ctx.shared_data["resources"]["pc"].close()
+
         return PeerDependencies(
             ctx=ctx,
             audio_handler=audio_pipeline,
+            on_connected_fully=on_connected_fully,
+            on_terminated=on_terminated
         )

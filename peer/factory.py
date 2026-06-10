@@ -1,5 +1,6 @@
 
-from peer.config import region, tier, rtc_configuration
+import logging
+from peer.config import build_rtc_config
 from peer.types import PeerDependencies, PeerSession
 
 
@@ -9,7 +10,7 @@ logger = logging.getLogger(__name__)
 async def create_peer(peer_dependencies: PeerDependencies):
     peer_session = PeerSession()
     
-    config = await rtc_configuration()
+    config = await build_rtc_config()
 
     pc = RTCPeerConnection(configuration=config)
     peer_session.set_pc(pc)

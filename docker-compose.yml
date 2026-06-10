@@ -236,6 +236,8 @@ services:
     image: voice-gateway:latest
     container_name: gateway
     restart: unless-stopped
+    networks:
+      - ai-net 
     ports:
       - "8081:8081"
     environment:
@@ -247,7 +249,7 @@ services:
       # Internal service URLs (Docker network DNS)
 
       # ── Database ──────────────────────────────────────────────────────────
-      POSTGRES_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}
+      POSTGRES_URL: "postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}"
       POSTGRES_HOST: ${POSTGRES_HOST}
       POSTGRES_PORT: ${POSTGRES_PORT}
       POSTGRES_USER: ${POSTGRES_USER}
@@ -255,9 +257,11 @@ services:
       POSTGRES_DB: ${POSTGRES_DB}
 
       # ── Redis ──────────────────────────────────────────────────────────
-      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/${REDIS_DB}
+      REDIS_HOST: "redis"
+      REDIS_PORT: "6379"
       REDIS_PASSWORD: ${REDIS_PASSWORD}
-      REDIS_DB: ${REDIS_DB}    
+      REDIS_DB: ${REDIS_DB}  
+      REDIS_URL: "redis://:${REDIS_PASSWORD}@${REDIS_HOST}:${REDIS_PORT}/${REDIS_DB}"
 
       # ── Cloudflare ──────────────────────────────────────────────────────────
       CLOUDFLARE_API_TOKEN: ${CLOUDFLARE_API_TOKEN}
@@ -273,13 +277,60 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-    networks:
-      - ai-net
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/health/ping"]
       interval: 15s
       timeout: 5s
       retries: 5
+      start_period: 15s
+
+  worker-1:
+    build:
+      context: .
+      dockerfile: worker/Dockerfile
+    image: voice-worker:latest
+    container_name: worker-1
+    restart: unless-stopped
+    networks:
+      - ai-net 
+    environment:
+
+      # ── LangFuse Tracing ──────────────────────────────────────────────────────────
+      LANGFUSE_SECRET_KEY: ${LANGFUSE_SECRET_KEY}
+      LANGFUSE_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY}
+      LANGFUSE_BASE_URL: ${LANGFUSE_BASE_URL}
+      
+      # ── Database ──────────────────────────────────────────────────────────
+      POSTGRES_URL: "postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}"
+      POSTGRES_HOST: ${POSTGRES_HOST}
+      POSTGRES_PORT: ${POSTGRES_PORT}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+
+      # ── Redis ──────────────────────────────────────────────────────────
+      REDIS_HOST: ${REDIS_HOST}
+      REDIS_PORT: ${REDIS_PORT}
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      REDIS_DB: ${REDIS_DB}  
+      REDIS_URL: "redis://:${REDIS_PASSWORD}@${REDIS_HOST}:${REDIS_PORT}/${REDIS_DB}"
+
+      # ── Cloudflare ──────────────────────────────────────────────────────────
+      CLOUDFLARE_API_TOKEN: ${CLOUDFLARE_API_TOKEN}
+      CLOUDFLARE_ACCOUNT_ID: ${CLOUDFLARE_ACCOUNT_ID}
+
+      # ── Config ──────────────────────────────────────────────────────────
+      TIER: standard
+      REGION: eu-west-1
+
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -u redis://:${REDIS_PASSWORD}@${REDIS_HOST}:${REDIS_PORT}/${REDIS_DB} EXISTS workers:heartbeat:$$WORKER_ID"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
       start_period: 15s
 
 
@@ -300,27 +351,42 @@ services:
     depends_on:
       - fastapi
   
-
   redis:
     image: redis:7-alpine
     container_name: redis
     ports:
-      - "6379:6379"
+      - "${REDIS_PORT}:${REDIS_PORT}"
     volumes:
       - redis_data:/data
     restart: unless-stopped
+    networks:
+      - ai-net 
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      REDIS_PORT: ${REDIS_PORT}
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "-p", "${REDIS_PORT}", "ping"]
       interval: 5s
-      timeout: 3s
+      timeout: "3s"
       retries: 5
-    command: ["redis-server", "--save", "60", "1", "--loglevel", "warning", "--requirepass", "${REDIS_PASSWORD}"]
+    command:
+      - redis-server
+      - --save
+      - "60 1"
+      - --loglevel
+      - warning
+      - --requirepass
+      - ${REDIS_PASSWORD}
+      - --port
+      - ${REDIS_PORT}
 
   postgres:
     image: postgres:15-alpine
     container_name: postgres
     ports:
       - "${POSTGRES_PORT}:5432"
+    networks:
+      - ai-net 
     environment:
       POSTGRES_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}
       POSTGRES_HOST: ${POSTGRES_HOST}
@@ -346,6 +412,8 @@ services:
     volumes:
       - ./gateway:/app/gateway 
     command: python /app/gateway/db/init.db.py
+    networks:
+      - ai-net 
     depends_on:
       - postgres
     environment:
@@ -371,6 +439,8 @@ services:
       - ./gateway:/app/gateway 
     # Points python directly to your execution entry point
     command: python /app/gateway/db/seed.py
+    networks:
+      - ai-net 
     depends_on:
       init_db:
         condition: service_completed_successfully

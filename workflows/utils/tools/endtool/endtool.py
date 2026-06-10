@@ -1,7 +1,7 @@
 
 from typing import Any
 from smolagents import Tool
-from signals import EndOfStream
+from workflows.signals import EndOfStream
 
 class EndConversationTool(Tool):
     name = "end_conversation"
