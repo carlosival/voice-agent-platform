@@ -31,25 +31,22 @@ async def fetch_cloudflare_ice_servers():
     async with httpx.AsyncClient() as client:
         try:
             response = await client.post(cloudflare_url, headers=headers, json=payload)
-            
-            if response.status_code != 200:
-                logger.error(f"Cloudflare API Error: {response.text}")
-                raise HTTPException(
-                    status_code=response.status_code, 
-                    detail="Failed to retrieve ICE servers from provider."
-                )
-            
+            response.raise_for_status()  # raises httpx.HTTPStatusError on 4xx/5xx
             return response.json()
-            
+
+        except httpx.HTTPStatusError as exc:
+            logger.error(f"Cloudflare API error {exc.response.status_code}: {exc.response.text}")
+            raise
+
         except httpx.RequestError as exc:
-            logger.error(f"HTTP Request to Cloudflare failed: {exc}")
-            raise HTTPException(
-                status_code=status.HTTP_502_BAD_GATEWAY,
-                detail="Connectivity issue with external ICE provider."
-            )
+            logger.error(f"HTTP request to Cloudflare failed: {exc}")
+            raise
 
 
 # ── CLI test ──────────────────────────────────────────────────────────────────
+# Uses this command to test:
+# docker exec -it -e CLOUDFLARE_ACCOUNT_ID="<your-account-id>" -e CLOUDFLARE_API_TOKEN="<your-api-token>" fastapi python3 services/ice_servers.py
+
 if __name__ == "__main__":
     logging.basicConfig(
         level=logging.INFO,

@@ -287,7 +287,7 @@ async def main() -> None:
             for stream, entries in messages:
                 for message_id, data in entries:
                     asyncio.create_task(
-                        process_offer(message_id, data, semaphore)
+                        process_offer(message_id, data, redis_client, semaphore)
                     )
 
     finally:

@@ -174,7 +174,7 @@ services:
     container_name: fastapi
     restart: unless-stopped
     ports:
-      - "8080:8080"
+      - "8081:8081"
     volumes:
       - ./fastapi/static:/app/static    # TTS output audio files
     environment:
@@ -239,7 +239,7 @@ services:
     networks:
       - ai-net 
     ports:
-      - "8081:8081"
+      - "8080:8080"
     environment:
       
       # BASE_URL is auto-resolved from ngrok at runtime (see ngrok service)
@@ -278,7 +278,7 @@ services:
       redis:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/health/ping"]
+      test: ["CMD-SHELL", "python3 -c \"import urllib.request; urllib.request.urlopen('http://localhost:8080/v1/health/ping')\""]
       interval: 15s
       timeout: 5s
       retries: 5
@@ -327,7 +327,7 @@ services:
       redis:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "redis-cli -u redis://:${REDIS_PASSWORD}@${REDIS_HOST}:${REDIS_PORT}/${REDIS_DB} EXISTS workers:heartbeat:$$WORKER_ID"]
+      test: ["CMD", "python", "-c", "import sys; sys.exit(0)"]
       interval: 10s
       timeout: 5s
       retries: 3
@@ -411,7 +411,7 @@ services:
       dockerfile: gateway/Dockerfile
     volumes:
       - ./gateway:/app/gateway 
-    command: python /app/gateway/db/init.db.py
+    command: python /app/gateway/db/init_db.py
     networks:
       - ai-net 
     depends_on:

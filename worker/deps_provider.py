@@ -6,21 +6,60 @@ from workflows.utils.memory import InMemoryMemory
 from workflows.utils.observavility import get_tracer
 from httpx import AsyncClient
 from workflows import AudioOutputTrack
-import time
-import os
+from httpx import AsyncClient
+from aiortc import RTCPeerConnection
 
+from dbs_clients import AsyncSessionFactory, VoiceAgent
+from fastapi.utils.speech_to_text import call_stt_from_frames_openai, call_stt_from_frames_speaches
+from fastapi.utils.text_to_speech import call_tts_stream_google, call_tts_stream_speaches
+from fastapi.utils.call_llm import call_llm_stream_openai
 
+logger = logging.getLogger(__name__)
+
+# Global singletons
 end_conversation_tool = EndConversationTool()
 http_client = AsyncClient(timeout=60.0)
 tracer = get_tracer(http_client)
 
 class DepProvider:
-    def __init__(self):
-        pass
+    @staticmethod
+    async def build(session_id: str, agent_id: str) -> PeerDependencies:
+        """
+        Dynamically builds the execution context and dependencies for a voice session
+        based on the agent configuration stored in the database.
+        """
+        
+        # 1. Fetch Agent Config from DB
+        async with AsyncSessionFactory() as session:
+            stmt = select(VoiceAgent).where(VoiceAgent.id == agent_id)
+            result = await session.execute(stmt)
+            agent = result.scalar_one_or_none()
+            
+            if not agent:
+                logger.error(f"Agent {agent_id} not found in database. Using defaults.")
+                # Fallback or raise error? For now, let's assume we need it.
+                raise RuntimeError(f"Agent {agent_id} not found.")
 
-    def build(self, session_id: str) -> PeerDependencies:
+        # 2. Configure STT Function
+        stt_config = agent.stt_config
+        if stt_config.get("engine") == "speaches":
+            stt_func = call_stt_from_frames_speaches
+        else:
+            stt_func = call_stt_from_frames_openai
 
-        # Generate a deterministic ID based on a seed
+        # 3. Configure TTS Function
+        tts_config = agent.tts_config
+        if tts_config.get("engine") == "speaches":
+            tts_func = call_tts_stream_speaches
+        elif tts_config.get("engine") == "google":
+            tts_func = call_tts_stream_google
+        else:
+            tts_func = call_tts_stream_speaches # Fallback
+
+        # 4. Configure LLM Function
+        llm_func = call_llm_stream_openai # Currently only OpenAI-compatible supported
+
+        # 5. Build Trace Context
         session_trace_id = tracer.create_trace_id(seed=session_id)
 
         ctx = ExecContext(shared_data={

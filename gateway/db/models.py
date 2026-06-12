@@ -23,11 +23,11 @@ class UserAgentAssociation(Base):
     # Optional: If a user wants to override a specific prompt setting on a generic agent
     custom_config_override: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True) # {"business_name": "Acme Corp"}
     
-    # Tier tells you wich hardware and compliance the agent you be deployed in
-    tier: Mapped[str] = mapped_column(String(50), default="free")
+    # Single value — clear billing/compliance boundary
+    tier: Mapped[str] = mapped_column(String(50), nullable=False, default="free")
 
-    # Region tells you which part of the world the agent you be deployed in
-    region: Mapped[str] = mapped_column(String(50), default="global")
+    # Multi-value — real deployment topology
+    region: Mapped[List[str]] = mapped_column(ARRAY(String), nullable=False, default=["global"])
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
 

@@ -31,30 +31,27 @@ async def get_ice_servers() -> list[RTCIceServer]:
         return _ice_cache["servers"]  # already list[RTCIceServer]
 
     try:
-        data = await fetch_cloudflare_ice_servers() 
-
+        data = await fetch_cloudflare_ice_servers()
         ice_servers = []
 
-        # STUN
-        for url in data.get("iceServers", {}).get("urls", []):
-            if url.startswith("stun:"):
-                ice_servers.append(RTCIceServer(urls=url))
+        for server in data.get("iceServers", []):  # iterate list
+            urls = server.get("urls", [])
+            username = server.get("username")
+            credential = server.get("credential")
 
-        # TURN
-        username = data["iceServers"].get("username")
-        credential = data["iceServers"].get("credential")
+            for url in urls:
+                if url.startswith("stun:"):
+                    ice_servers.append(RTCIceServer(urls=url))
+                elif url.startswith("turn:") or url.startswith("turns:"):
+                    ice_servers.append(RTCIceServer(
+                        urls=url,
+                        username=username,
+                        credential=credential,
+                    ))
 
-        for url in data.get("iceServers", {}).get("urls", []):
-            if url.startswith("turn:") or url.startswith("turns:"):
-                ice_servers.append(RTCIceServer(
-                    urls=url,
-                    username=username,
-                    credential=credential,
-                ))
-
-            _ice_cache["servers"] = ice_servers
-            _ice_cache["expires_at"] = now + ICE_CACHE_TTL
-            return servers
+        _ice_cache["servers"] = ice_servers
+        _ice_cache["expires_at"] = now + ICE_CACHE_TTL
+        return ice_servers
 
     except Exception as e:
         logger.error(f"Failed to fetch ICE servers: {e}")

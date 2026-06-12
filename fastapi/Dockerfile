@@ -30,6 +30,6 @@ RUN mkdir -p ./static
 # Updated to match the new workdir path
 ENV PYTHONPATH="/app"
 
-EXPOSE 8080
+EXPOSE 8081
 
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080", "--workers", "1"]

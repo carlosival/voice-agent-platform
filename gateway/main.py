@@ -6,12 +6,10 @@ from fastapi.middleware.cors import CORSMiddleware
 
 
 # Import routers
-from gateway.routes.init_session import router as init_router
-from gateway.routes.handshake import router as handshake_router
-from gateway.routes.ice_servers import router as ice_router
+from gateway.routes import get_token, handshake, ice_servers, health
 
 # Import DB
-from dbs_clients.db import AsyncSessionFactory, async_engine
+from dbs_clients import AsyncSessionFactory, async_engine
 
 # Import Redis
 from dbs_clients.redis_db import redis_client
@@ -58,13 +56,11 @@ app.add_middleware(
 )
 
 # Register Routers
-app.include_router(init_router, tags=["Session"])
-app.include_router(handshake_router, prefix="/api", tags=["WebRTC"])
-app.include_router(ice_router, prefix="/api", tags=["WebRTC"])
+app.include_router(get_token.router, tags=["Session"])
+app.include_router(handshake.router, prefix="/v1", tags=["WebRTC"])
+app.include_router(ice_servers.router, prefix="/v1", tags=["WebRTC"])
+app.include_router(health.router, prefix="/v1", tags=["Health"])
 
-@app.get("/health/ping")
-async def ping():
-    return {"status": "ok", "service": "gateway"}
 
 @app.get("/")
 def read_root():

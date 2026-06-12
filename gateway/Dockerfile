@@ -36,7 +36,7 @@ ENV PYTHONPATH="/app"
 COPY dbs_clients/ ./dbs_clients/
 COPY gateway/ ./gateway/
 
-EXPOSE 8000
+EXPOSE 8080
 
 # Run Uvicorn relative to the /app directory
-CMD ["uvicorn", "gateway.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "gateway.main:app", "--host", "0.0.0.0", "--port", "8080"]

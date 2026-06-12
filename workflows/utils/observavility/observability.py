@@ -17,7 +17,7 @@ def get_tracer(httpx_client: Optional[AsyncClient] = None) -> Optional[Langfuse]
 
     public_key = os.getenv("LANGFUSE_PUBLIC_KEY")
     secret_key = os.getenv("LANGFUSE_SECRET_KEY")
-    host = os.getenv("LANGFUSE_HOST")
+    host = os.getenv("LANGFUSE_BASE_URL")
 
     if not all([public_key, secret_key, host]):
         logger.warning("Langfuse env vars not set, tracing disabled")

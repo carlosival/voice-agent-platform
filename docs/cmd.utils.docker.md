@@ -22,3 +22,8 @@ docker compose down
 # See docker containers's inside folder structure
 docker compose run --rm {container_name} find . -maxdepth 3
 
+# Inpect docker container network
+docker inspect <container_name> | grep -i "NetworkSettings" -A 10
+
+# Run profiles
+docker compose --profile tools run --rm seed_db
