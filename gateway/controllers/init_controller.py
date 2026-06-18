@@ -32,6 +32,13 @@ class SessionInitializeResponse(BaseModel):
 
 class InitController:
     
+    def _get_client_ip(self, request: Request) -> str:
+        """Resolves the client IP, handling reverse proxies."""
+        forwarded = request.headers.get("X-Forwarded-For")
+        if forwarded:
+            return forwarded.split(",")[0].strip()
+        return request.client.host
+
     async def get_token(self, request: Request, body: SessionInitializeRequest) -> dict:
         # --- Parse & validate input ---
         try:
@@ -41,7 +48,7 @@ class InitController:
 
         pk = body.pk
         agent_id = body.agent_id
-        client_ip = request.client.host
+        client_ip = self._get_client_ip(request)
         client_origin = request.headers.get("origin") or request.headers.get("referer")
         parsed = urlparse(client_origin)
         client_domain = parsed.hostname
@@ -127,10 +134,12 @@ class InitController:
         session_id = str(uuid.uuid4())
         expiration = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(seconds=TOKEN_EXPIRATION_SECONDS)
         token_claims = {
-            
+            "tier": agent_config.get("tier"),
+            "region": agent_config.get("region"),
             "session_id": session_id,
             "pk_id": str(key_record.id),
             "agent_id": agent_id,
+            "client_ip": client_ip,
             "exp": expiration,
         }
 

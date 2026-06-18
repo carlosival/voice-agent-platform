@@ -32,14 +32,13 @@ async def signaling_handler(ws: WebSocket):
     
     # ── Origin check through decorators ──────────────────────────────────────────────────────
     
-
-    await ws.accept()
-
     peer_session = await create_peer(ws)
     pc = peer_session.pc
     ctx = peer_session.ctx
     tasks = peer_session.tasks
     output_track = ctx.shared_data["resources"]["output_track"]
+
+    await ws.accept()
 
     try:
         while True:       

@@ -14,6 +14,9 @@ from dbs_clients import AsyncSessionFactory, async_engine
 # Import Redis
 from dbs_clients.redis_db import redis_client
 
+# Import Router cleanup
+from gateway.worker_router.worker_router import close_geoip_reader
+
 # Setup logging
 logging.basicConfig(
     level=logging.INFO,
@@ -36,6 +39,7 @@ async def lifespan(app: FastAPI):
     
     # --- Shutdown ---
     logger.info("Cleaning up Gateway dependencies...")
+    close_geoip_reader()
     await app.state.redis.aclose()
     await async_engine.dispose()
 

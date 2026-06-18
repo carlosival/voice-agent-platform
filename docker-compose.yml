@@ -271,6 +271,8 @@ services:
       GATEWAY_SECRET_KEY: ${GATEWAY_SECRET_KEY}
       ALGORITHM: ${ALGORITHM}
       TOKEN_EXPIRATION_SECONDS: ${TOKEN_EXPIRATION_SECONDS}
+    volumes:
+      - ./gateway:/app/gateway 
 
     depends_on:
       postgres:
