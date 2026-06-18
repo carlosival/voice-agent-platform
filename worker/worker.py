@@ -44,6 +44,7 @@ CLOUDFLARE_API_TOKEN = os.getenv("CLOUDFLARE_API_TOKEN")
 STREAM_KEY = f"webrtc:offers:{TIER}:{REGION}"
 GROUP_NAME = f"media-workers"
 
+
 # ── Validate required env ─────────────────────────────────────────────────────
 _required = {
     "CLOUDFLARE_ACCOUNT_ID": CLOUDFLARE_ACCOUNT_ID,
@@ -89,6 +90,7 @@ async def _ice_trickle(
     pc: RTCPeerConnection,
     redis_client: Redis,
 ) -> None:
+    
     """Publish the answer immediately, then exchange candidates bidirectionally."""
     await redis_client.xadd(
         f"webrtc:answer:{session_id}",
@@ -116,7 +118,7 @@ _STRATEGY_MAP = {
 }
 
 
-async def run_ice_strategy(
+async def run_answer_ice_strategy(
     session_id: str,
     pc: RTCPeerConnection,
     redis_client: Redis,
@@ -288,8 +290,8 @@ def get_batch_size() -> int:
     return 10
 
 
-# ── Offer processing ──────────────────────────────────────────────────────────
-async def process_offer(
+# ── Message processing ──────────────────────────────────────────────────────────
+async def process_message(
     message_id: str,
     data: dict,
     redis_client: Redis,
@@ -310,11 +312,9 @@ async def process_offer(
         )
 
         # ── Build peer Dependencies and Context ────────────────────────────────────────────────────
-        deps = DepProvider.build(session_id) 
+        deps = await DepProvider.build(session_id) 
 
         peer_session = await create_peer(deps)
-        pc = peer_session.pc
-        deps.ctx["resources"]["peer_connection"] = pc
         active_sessions[session_id] = peer_session
 
         try:
@@ -323,20 +323,21 @@ async def process_offer(
                 sdp=data["sdp"],
                 type=data["type"],
             )
-            await pc.setRemoteDescription(offer)
+            await peer_session.pc.setRemoteDescription(offer)
 
             # ── Configure transceivers ────────────────────────────────────
-            for transceiver in pc.getTransceivers():
+            for transceiver in peer_session.pc.getTransceivers():
                 if transceiver.kind == "audio":
                     transceiver.direction = "sendrecv"
-                    transceiver.sender.replaceTrack(peer_session.output_track)
+                    transceiver.sender.replaceTrack(deps.ctx.shared_data["resources"]["output_track"])
 
             # ── Generate answer ───────────────────────────────────────────
-            answer = await pc.createAnswer()
-            await pc.setLocalDescription(answer)
+            answer = await peer_session.pc.createAnswer()
+            await peer_session.pc.setLocalDescription(answer)
 
+    
             # ── Single call — strategy selected via ICE_STRATEGY env var ─────
-            await run_ice_strategy(session_id, pc, redis_client)
+            await run_answer_ice_strategy(session_id, peer_session.pc, redis_client)
 
 
             # ── Ack only on success ───────────────────────────────────────

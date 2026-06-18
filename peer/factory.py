@@ -15,6 +15,31 @@ async def create_peer(peer_dependencies: PeerDependencies):
     pc = RTCPeerConnection(configuration=config)
     peer_session.set_pc(pc)
  
+    # Inject PC into the shared context so the callbacks can close it
+    peer_dependencies.ctx.shared_data["resources"]["pc"] = pc
+
+    _fully_connected = False  # guard against double-fire
+
+    def _check_fully_connected():
+        nonlocal _fully_connected
+        if _fully_connected:
+            return
+        if (
+            pc.iceConnectionState in ("connected", "completed")
+            and pc.connectionState == "connected"
+        ):
+            _fully_connected = True
+            if peer_dependencies.on_connected_fully:
+                peer_dependencies.on_connected_fully()
+
+
+    def _cancel_tasks(peer_session: PeerSession) -> None:
+        for task in peer_session.tasks:
+            if not task.done():
+                task.cancel()
+
+
+   
 
     # ── ICE state logging ─────────────────────────────────────────────────
     @pc.on("iceconnectionstatechange")
@@ -24,28 +49,22 @@ async def create_peer(peer_dependencies: PeerDependencies):
             logger.error("ICE failed — no valid path found")
         if peer_session.pc.iceConnectionState in ["connected", "completed"]:
             logger.info("ICE connected")
-            if peer_session.pc.connectionState == "connected": # A fully established connection
-                logger.info("PeerConnection established fully")
-                peer_dependencies.on_connected_fully()
+        
 
-    # ── Connection state logging ───────────────────────────────────────────
+    # ── Connection state change ───────────────────────────────────────────
     @pc.on("connectionstatechange")
     async def on_conn_state():
-        logger.info(f"Connection state: {peer_session.pc.connectionState}")
-        if peer_session.pc.connectionState in ("failed", "closed"):
-            # When the connection dies, kill all associated tasks
-            for task in peer_session.tasks:
-                if not task.done():
-                    task.cancel()
-            peer_dependencies.on_terminated()
+        state = pc.connectionState
+        logger.info(f"Connection state: {state}")
+        if state == "connected":
+            if peer_dependencies.on_connected_fully:
+                peer_dependencies.on_connected_fully()   # DTLS + ICE both done
+        if state in ("failed", "closed"):
+            _cancel_tasks(peer_session)
+            if peer_dependencies.on_terminated:
+                peer_dependencies.on_terminated()
         
-        if peer_session.pc.connectionState in ["connected", "completed"]:
-            logger.info("PeerConnection established")
-            if peer_session.pc.iceConnectionState in ["connected", "completed"]: # A fully established connection
-                logger.info("PeerConnection and ICE connected — closing WebSocket")
-                peer_dependencies.on_connected_fully()
-
-
+       
     # ── Track handler ─────────────────────────────────────────────────────
     @pc.on("track")
     async def on_track(track):

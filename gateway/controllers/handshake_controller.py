@@ -93,7 +93,7 @@ class HandshakeController:
     agent = AgentConfig(
         agent_id=agent_id,
         tier=tier,
-        regions=[region, "global"] if region else ["global"],
+        regions=regions,
     )
 
     try:
@@ -201,6 +201,15 @@ class HandshakeController:
                     # ── Answer ────────────────────────────────────────────
                     if stream_name_str == answer_stream_key:
                         answer_cursor = msg_id
+
+                        # Lifecycle event — no payload field
+                        if b"event" in payload:
+                            event = payload[b"event"].decode()
+                            if event == "connected":
+                                await websocket.close(code=1000)
+                                return # exits outbound loop
+                            continue
+
                         answer = json.loads(payload[b"payload"])
                         logger.info(f"[{session_id}] Forwarding answer to client")
                         await websocket.send_text(json.dumps({

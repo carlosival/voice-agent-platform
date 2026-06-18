@@ -1,9 +1,11 @@
 from typing import Callable
 from aiortc import MediaStreamTrack, RTCDataChannel
 from yaafpy import ExecContext
+from dataclasses import dataclass
 
 
 #INPUT of CREATE PEER Connection
+@dataclass
 class PeerDependencies:
     ctx: ExecContext
     audio_handler: Callable[[MediaStreamTrack], None] = None
