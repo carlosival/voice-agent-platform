@@ -651,7 +651,7 @@ async def tts(
                 if text is None:
                     break
                 
-                gen = call_tts_stream_google(text, debug=True)
+                gen = call_tts_stream(http_client, text, debug=True)
                 frame_count = 0
                 
                 async for pcm_chunk in gen:

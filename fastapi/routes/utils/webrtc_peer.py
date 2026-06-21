@@ -20,15 +20,6 @@ from utils.tools.tools import EndConversationTool
 logger = logging.getLogger(__name__)
 active_connections = set()
 
-# INPUT of CREATE PEER Connection
-class PeerDependencies:
-    audio_handler: Callable[[track], None]
-    video_handler: Callable[[track], None]
-    data_handler: Callable[[track], None]
-    on_connected_fully: Callable[[], None] =lambda: ws.close(code=1000),  # ← WebSocket callback  
-    on_track: Callable[[track], None]
-    on_ice_state_change: Callable[[str], None] = lambda state: logger.info(f"ICE state: {state}"),
-    on_connection_state_change: Callable[[str], None] = lambda state: logger.info(f"Connection state: {state}")
 
 # OUTPUT CREATE PEER Connection
 class PeerSession:
