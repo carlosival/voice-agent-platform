@@ -60,7 +60,7 @@ app.add_middleware(
 )
 
 # Register Routers
-app.include_router(get_token.router, tags=["Session"])
+app.include_router(get_token.router,prefix="/v1", tags=["Session"])
 app.include_router(handshake.router, prefix="/v1", tags=["WebRTC"])
 app.include_router(ice_servers.router, prefix="/v1", tags=["WebRTC"])
 app.include_router(health.router, prefix="/v1", tags=["Health"])

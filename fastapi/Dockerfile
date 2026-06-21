@@ -4,32 +4,49 @@
 # No GPU needed here — all inference is delegated.
 # ─────────────────────────────────────────────────────────────────────────────
 
-FROM python:3.11-slim
+# --- Build Stage ---
+FROM python:3.11-slim AS builder
 
 WORKDIR /app
 
-# System deps
+# Install system compilation dependencies if any pip wheels need building
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl ffmpeg \
+    build-essential \
     && rm -rf /var/lib/apt/lists/*
 
-# Python deps
+# Upgrade pip and install dependencies into a localized wheels/cache directory or global site-packages
 COPY fastapi/requirements.txt .
-
-# Upgrading pip first handles large wheel extractions much more efficiently
 RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir -r requirements.txt
+    pip install --no-cache-dir --user -r requirements.txt
 
-# Copy the shared folder and the API gateway application
+
+# --- Final Runtime Stage ---
+FROM python:3.11-slim AS runtime
+
+WORKDIR /app
+
+# Install runtime system dependencies (ffmpeg is heavy; keeping layers clean)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy installed python packages from builder stage
+COPY --from=builder /root/.local /root/.local
+ENV PATH=/root/.local/bin:$PATH
+
+# Copy internal shared infrastructure modules
 COPY dbs_clients/ ./dbs_clients/
-COPY fastapi/ ./fastapi/ 
+COPY pipelines/ ./pipelines/
+COPY workflows/ ./workflows/
 
-# static dir might not exist yet — create it, don't COPY it
-RUN mkdir -p ./static
+# Copy the FastAPI core code directly to /app/fastapi
+COPY fastapi/ .
 
-# Updated to match the new workdir path
+# Ensure Python looks at /app root to resolve absolute imports (e.g., import dbs_clients.redis_db)
 ENV PYTHONPATH="/app"
+ENV PYTHONUNBUFFERED=1
 
 EXPOSE 8081
 
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080", "--workers", "1"]
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8081", "--workers", "1"]

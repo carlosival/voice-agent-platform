@@ -8,9 +8,9 @@ from httpx import AsyncClient
 from workflows import AudioOutputTrack
 from httpx import AsyncClient
 from aiortc import RTCPeerConnection
-
+import logging
 from dbs_clients import redis_client
-
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -21,7 +21,7 @@ tracer = get_tracer(http_client)
 
 class DepProvider:
     @staticmethod
-    async def build(session_id: str, agent_config: Dict[str, Any] = None) -> PeerDependencies:
+    async def build(session_id: str, agent_config: dict[str, Any] = None) -> PeerDependencies:
         """
         Dynamically builds the execution context and dependencies for a voice session
         based on the agent configuration stored in the cache and database.

@@ -27,3 +27,6 @@ docker inspect <container_name> | grep -i "NetworkSettings" -A 10
 
 # Run profiles
 docker compose --profile tools run --rm seed_db
+
+# List running containers
+docker ps --format "{{json .}}" --filter "status=running"

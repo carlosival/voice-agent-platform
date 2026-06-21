@@ -6,7 +6,7 @@ import signal
 import uuid
 import enum
 
-from aiortc import RTCPeerConnection, RTCSessionDescription
+from aiortc import RTCPeerConnection, RTCSessionDescription, RTCIceCandidate
 from redis.asyncio import Redis
 
 
@@ -267,17 +267,10 @@ async def reclaim_abandoned(redis_client: Redis, stop_event: asyncio.Event) -> N
 
 
 # ── Load reporting ────────────────────────────────────────────────────────────
-async def report_load(redis_client: Redis, stop_event: asyncio.Event) -> None:
-    """Heartbeat + load reporting every 5 seconds."""
-    while not stop_event.is_set():
-        try:
-            load = len(active_sessions)
-            await redis_client.hset("workers:load", WORKER_ID, load)
-            await redis_client.set(f"workers:heartbeat:{WORKER_ID}", 1, ex=10)
-            logger.debug(f"Load reported: {load} active sessions")
-        except Exception as e:
-            logger.error(f"Load report failed: {e}")
-        await asyncio.sleep(5)
+#  Expose a lightweight HTTP health endpoint (using a micro-framework like aiohttp or FastAPI running on a secondary port inside the container)
+#  Autoscaler  ─── GET /health ───>  [ Worker Container ]
+#             <─── { "load": 12 } ───
+
 
 
 # ── Batch size backpressure ───────────────────────────────────────────────────
@@ -357,7 +350,7 @@ async def process_message(
             })
             # Ack malformed messages — retrying won't fix them
             await redis_client.xack(STREAM_KEY, GROUP_NAME, message_id)
-            await pc.close()
+            await peer_session.pc.close()
 
         except Exception as e:
             logger.error(
@@ -366,7 +359,7 @@ async def process_message(
                 exc_info=True,
             )
             # Do not ack — message stays pending for reclaim
-            await pc.close()
+            await peer_session.pc.close()
 
         finally:
             active_sessions.pop(session_id, None)
@@ -450,20 +443,49 @@ async def main() -> None:
         loop.add_signal_handler(sig, stop_event.set)
 
     # Background tasks
-    asyncio.create_task(report_load(redis_client, stop_event))
-    asyncio.create_task(reclaim_abandoned(redis_client, stop_event))
+    bg_tasks = [
+        asyncio.create_task(reclaim_abandoned(redis_client, stop_event))
+    ]
+
+    # Running messages processing tasks
+    running_tasks: set[asyncio.Task] = set()
+
+    # Single persistent stop task — avoids leaking a new task every iteration
+    stop_task = asyncio.create_task(stop_event.wait())
+
 
     try:
         while not stop_event.is_set():
             try:
                 batch_size = get_batch_size()
-                messages = await redis_client.xreadgroup(
-                    GROUP_NAME,
-                    WORKER_ID,
-                    {STREAM_KEY: ">"},
-                    count=batch_size,
-                    block=2000,
+                
+                # Creamos la lectura de Redis como una tarea asegurable
+                read_task = asyncio.create_task(
+                    redis_client.xreadgroup(
+                        GROUP_NAME,
+                        WORKER_ID,
+                        {STREAM_KEY: ">"},
+                        count=batch_size,
+                        block=2000,
+                    )
                 )
+
+                # Esperamos a que termine la lectura O a que se active el evento de parada
+                # Esto rompe instantáneamente el bloqueo si Docker envía un SIGTERM
+                await asyncio.wait(
+                    [read_task, stop_task],
+                    return_when=asyncio.FIRST_COMPLETED
+                )
+
+                if stop_event.is_set():
+                    if not read_task.done():
+                        read_task.cancel()
+                    break
+
+                messages = await read_task
+                if not messages:
+                    continue
+
             except asyncio.CancelledError:
                 break
             except Exception as e:
@@ -476,11 +498,23 @@ async def main() -> None:
 
             for stream, entries in messages:
                 for message_id, data in entries:
-                    asyncio.create_task(
-                        process_offer(message_id, data, redis_client, semaphore)
+                   task = asyncio.create_task(
+                        process_message(message_id, data, redis_client, semaphore)
                     )
+                   running_tasks.add(task)
+                   task.add_done_callback(running_tasks.discard)
 
     finally:
+        logger.info("Main loop finished. Initiating shutdown sequence...")
+        stop_task.cancel()
+        logger.info("Main loop finished. Initiating shutdown sequence...")
+        for task in bg_tasks:
+            task.cancel()
+        await asyncio.gather(*bg_tasks, return_exceptions=True)
+
+        if running_tasks:
+            logger.info(f"Waiting for {len(running_tasks)} in-flight sessions to finish...")
+            await asyncio.gather(*running_tasks, return_exceptions=True)
         await shutdown()
 
 

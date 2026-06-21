@@ -13,7 +13,9 @@ COPY gateway/requirements.txt .
 
 RUN python -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
-RUN pip install --no-cache-dir -r requirements.txt
+
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir -r requirements.txt
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Stage 2: Final Runtime
@@ -23,20 +25,32 @@ FROM python:3.11-slim AS runtime
 # Set internal directory to /app
 WORKDIR /app
 
+# Install runtime system dependencies (ffmpeg is required for processing audio tracks)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
+
 # Copy the virtual environment from the builder stage
 COPY --from=builder /opt/venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
-# Crucial: Python will now look inside /app for your packages
+# Crucial: Python will now look inside /app for all platform packages
 ENV PYTHONPATH="/app"
+ENV PYTHONUNBUFFERED=1
 
-
-
-# Copy the folders into /app/dbs_clients and /app/gateway
+# Copy shared platform infrastructure folders into /app/
 COPY dbs_clients/ ./dbs_clients/
+COPY pipelines/ ./pipelines/
+COPY workflows/ ./workflows/
+
+# Copy the core gateway service code into /app/gateway
 COPY gateway/ ./gateway/
+
+# Ensure static directory structure exists for assets/debug logs
+RUN mkdir -p ./gateway/static
 
 EXPOSE 8080
 
 # Run Uvicorn relative to the /app directory
-CMD ["uvicorn", "gateway.main:app", "--host", "0.0.0.0", "--port", "8080"]
+CMD ["uvicorn", "gateway.main:app", "--host", "0.0.0.0", "--port", "8080", "--workers", "1"]
