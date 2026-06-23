@@ -268,6 +268,7 @@ async def resolve_stream_key(
 
     # 3. fetch available (healthy, non-full) streams for this tier
     available = await get_available_streams(tier, redis, CONSUMER_GROUP)
+    
     if not available:
         raise NoCapacityError(tier, agent.tier)
 

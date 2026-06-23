@@ -1,4 +1,4 @@
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, status, Request, WebSocket
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from typing import Optional
 import jwt
@@ -7,6 +7,13 @@ import os
 
 security = HTTPBearer()
 
+
+def _get_client_ip(request: Request | WebSocket) -> str:
+        """Resolves the client IP, handling reverse proxies."""
+        forwarded = request.headers.get("X-Forwarded-For")
+        if forwarded:
+            return forwarded.split(",")[0].strip()
+        return request.client.host
 
 def verify_token_credentials(
     credentials: HTTPAuthorizationCredentials = Depends(security)

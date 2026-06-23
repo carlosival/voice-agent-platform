@@ -43,6 +43,7 @@ ENV PYTHONUNBUFFERED=1
 COPY dbs_clients/ ./dbs_clients/
 COPY pipelines/ ./pipelines/
 COPY workflows/ ./workflows/
+COPY services/ ./services/
 
 # Copy the core gateway service code into /app/gateway
 COPY gateway/ ./gateway/

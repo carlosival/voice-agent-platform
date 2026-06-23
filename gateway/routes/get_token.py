@@ -18,7 +18,6 @@ logger = logging.getLogger(__name__)
 init_controller = InitController()
 
 
-
 @router.post(
     "/api/get_token",
     response_model=SessionInitializeResponse,

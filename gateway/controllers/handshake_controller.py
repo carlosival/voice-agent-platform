@@ -3,8 +3,8 @@ import json
 import asyncio
 import logging
 import jwt
-from fastapi import APIRouter, Request, Depends, HTTPException, status, WebSocket
-from gateway.controllers.helper import verify_token_credentials
+from fastapi import APIRouter, Request, Depends, HTTPException, status, WebSocket, WebSocketException
+from gateway.controllers.helper import verify_token_credentials, verify_raw_token
 from gateway.worker_router.worker_router import resolve_stream_key, AgentConfig, NoCapacityError
 from pydantic import BaseModel
 
@@ -47,7 +47,7 @@ class HandshakeController:
 
         # --- Decode & validate JWT ---
         try:
-            token_decoded = verify_token_credentials(token)
+            token_decoded = verify_raw_token(token)
         except Exception as e:
             await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
             raise e
@@ -57,7 +57,7 @@ class HandshakeController:
         token_ip   = token_decoded.get("client_ip")
         pk_id      = token_decoded.get("pk_id")
         tier       = token_decoded.get("tier")
-        region     = token_decoded.get("region")
+        regions    = token_decoded.get("regions")
 
         if not session_id or not agent_id or pk_id is None:
             await websocket.close(code=status.WS_1008_POLICY_VIOLATION)

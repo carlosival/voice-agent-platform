@@ -9,7 +9,7 @@ class WebRTCController {
   }
 
 
-  async getWSUrl(init_URL = CONSTANTS.WS_INIT_URL) {
+  async getWSUrl(init_URL = CONSTANTS.INIT_URL) {
 
         const response = await fetch(init_URL, {
         method: "POST",
@@ -23,7 +23,6 @@ class WebRTCController {
         });
 
         const data = await response.json();
-        localStorage.setItem("session_id", data.session_id);
         localStorage.setItem("token", data.token);
         localStorage.setItem("connection_url", data.connection_url);
         return data.connection_url;
@@ -31,7 +30,7 @@ class WebRTCController {
 
   // ─── CONNECT Through WebSocket ─────────────────────────────────────────────
 
-  async connectWebSocket() {
+  async connect() {
 
     // 1. Clean up existing connection if it exists
     if (this.ws) {
@@ -47,14 +46,40 @@ class WebRTCController {
     }
 
     try {
-      await this.getWSUrl(CONSTANTS.INIT_URL);
-      this.wsUrl = localStorage.getItem("connection_url");
+      
+      if (!this.wsUrl) 
+          this.wsUrl = await this.getWSUrl(CONSTANTS.INIT_URL);
+      
       console.log("WebSocket URL:", this.wsUrl);
       // 2. Create new WebSocket connection
       this.ws = new WebSocket(this.wsUrl);
 
+      // 1. Fetch from your server endpoint
+    const ice_servers_response = await fetch(CONSTANTS.GET_ICE_SERVERS, {
+      method: "GET",
+      headers: {
+        "Authorization": `Bearer ${token}`
+      }
+    });
+    const ice_servers = await ice_servers_response.json();
+    
+    // config contains exactly: { iceServers: [...] }
+    
+    // 2. Instantiate PeerConnection directly with the response object
+    // const pc = new RTCPeerConnection(ice_servers);
+    
+    console.log("WebRTC Peer Connection configured with Cloudflare TURN!");
+
+    const peerConfig = {
+      iceServers: ice_servers,
+      handleRemoteTrack: this.handleRemoteTrack,
+      handleIceCandidate: this.handleIceCandidateONCE,
+      handleConnectionStateChange: this.handleConnectionStateChange
+
+    };
+
       this.ws.onopen = async () => {
-      await this.setupPeerConnection();
+      await this.setupPeerConnection(peerConfig);
       await this.createAndSendOffer();
       this.setupEventListeners();
       window.dispatchEvent(new CustomEvent(AppEvents.WS_CONNECTED));

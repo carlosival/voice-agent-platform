@@ -32,8 +32,8 @@ MOCK_TTS = {"voice_id": "en-US-Neural-A", "engine": "cartesia", "speed": 1.0}
 MOCK_STT = {"engine": "deepgram", "model": "nova-2", "language": "en"}
 
 # New: valid values matching your model's constraints
-TIERS = ["free", "starter", "pro", "enterprise"]
-REGIONS = ["us-east", "us-west", "eu-west", "eu-central", "ap-southeast", "global"]
+TIERS = ["standard"]
+REGIONS = ["us-east-1", "us-west-1", "eu-west-1", "eu-central-1", "ap-southeast-1", "global"]
 
 async def seed_fixtures():
     async with AsyncSessionLocal() as session:

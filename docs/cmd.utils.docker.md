@@ -30,3 +30,6 @@ docker compose --profile tools run --rm seed_db
 
 # List running containers
 docker ps --format "{{json .}}" --filter "status=running"
+
+# Start a project with debug mode
+docker compose -f docker-compose.debug.yml build && docker compose -f docker-compose.debug.yml up -d

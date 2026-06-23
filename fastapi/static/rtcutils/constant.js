@@ -1,6 +1,6 @@
 const BASE_URL = window.location.origin;
-const INIT_URL = `${BASE_URL}/api/v1/sessions/initialize`;
-const GET_ICE_SERVERS = `${BASE_URL}/api/v1/ice-servers`;
+const INIT_URL = `${BASE_URL}/v1/api/get_token`;
+const GET_ICE_SERVERS = `${BASE_URL}/v1/api/get_ice_servers`;
 
 const CONSTANTS = Object.freeze({
     BASE_URL: BASE_URL,

@@ -10,7 +10,7 @@ class ConnectBtn extends HTMLElement {
 
     async getWSUrl() {
 
-        const response = await fetch(CONSTANTS.WS_INIT_URL, {
+        const response = await fetch(CONSTANTS.INIT_URL, {
         method: "POST",
         headers: {
             "Content-Type": "application/json",

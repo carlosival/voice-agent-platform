@@ -122,7 +122,7 @@ class InitController:
                     detail="You do not have permission to access this voice agent.",
                 )
 
-            # Populate cache asynchronously-safe (fire and check error)
+            # Populate cache cache some agent data
             try:
                 await redis.set(cache_key, json.dumps(agent_config), ex=AGENT_CACHE_TTL_SECONDS)
                 logger.debug("Agent config cached: %s (TTL=%ds)", cache_key, AGENT_CACHE_TTL_SECONDS)
@@ -135,7 +135,7 @@ class InitController:
         expiration = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(seconds=TOKEN_EXPIRATION_SECONDS)
         token_claims = {
             "tier": agent_config.get("tier"),
-            "region": agent_config.get("region"),
+            "regions": agent_config.get("regions"),
             "session_id": session_id,
             "pk_id": str(key_record.id),
             "agent_id": agent_id,
@@ -152,7 +152,7 @@ class InitController:
                 detail="Internal signing failure during initialization."
             )
 
-        # --- Persist session to Redis also you can cache some agent data---
+        # --- Persist session to Redis ---
         try:
             redis = request.app.state.redis
             await redis.set(f"session:{session_id}", signed_token, ex=TOKEN_EXPIRATION_SECONDS)
@@ -165,7 +165,7 @@ class InitController:
 
         return {
             "token": signed_token,
-            "connection_url": f"wss://{DOMAIN}/ws/{session_id}",
+            "connection_url": f"wss://{DOMAIN}/v1/handshake/{signed_token}",
         }
 
 

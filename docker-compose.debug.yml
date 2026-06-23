@@ -240,6 +240,7 @@ services:
       - ai-net 
     ports:
       - "8080:8080"
+      - "5678:5678"
     environment:
       
       # BASE_URL is auto-resolved from ngrok at runtime (see ngrok service)
@@ -284,6 +285,11 @@ services:
       timeout: 5s
       retries: 5
       start_period: 15s
+    command: >
+      sh -c "
+      pip install debugpy &&
+      python -m debugpy --listen 0.0.0.0:5678 -m uvicorn gateway.main:app --host 0.0.0.0 --port 8080 --reload
+      "
 
   worker-1:
     build:
