@@ -1,4 +1,4 @@
-from workflows.flows import VOICE_WORKFLOW
+from workflows import VOICE_WORKFLOW, track_frames
 from yaafpy import ExecContext
 import logging
 import asyncio
@@ -27,7 +27,7 @@ async def audio_pipeline(input_track, ctx):
     output_track = ctx.shared_data["resources"]["output_track"]
     logger.info("Pipeline starting")
     trace_id = ctx.shared_data["trace_context"]["trace_id"]
-    pc = ctx.shared_data["resources"]["peer_connection"]
+    pc = ctx.shared_data["resources"]["pc"]
     
     # 1. Manually start the root observation — no context manager needed
     session_trace = ctx.shared_data["resources"]["tracer"].start_observation(

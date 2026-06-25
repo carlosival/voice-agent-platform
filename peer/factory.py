@@ -2,7 +2,8 @@
 import logging
 from peer.config import build_rtc_config
 from peer.types import PeerDependencies, PeerSession
-
+from aiortc import RTCPeerConnection
+import asyncio
 
 logger = logging.getLogger(__name__)
 
@@ -22,15 +23,14 @@ async def create_peer(peer_dependencies: PeerDependencies):
 
     def _check_fully_connected():
         nonlocal _fully_connected
-        if _fully_connected:
+        if _fully_connected: # guard against double-fire
             return
         if (
             pc.iceConnectionState in ("connected", "completed")
             and pc.connectionState == "connected"
         ):
             _fully_connected = True
-            if peer_dependencies.on_connected_fully:
-                peer_dependencies.on_connected_fully()
+            return _fully_connected
 
 
     def _cancel_tasks(peer_session: PeerSession) -> None:
@@ -41,14 +41,21 @@ async def create_peer(peer_dependencies: PeerDependencies):
 
    
 
+
     # ── ICE state logging ─────────────────────────────────────────────────
+
     @pc.on("iceconnectionstatechange")
     async def on_ice_state():
         logger.info(f"ICE state: {peer_session.pc.iceConnectionState}")
         if peer_session.pc.iceConnectionState == "failed":
             logger.error("ICE failed — no valid path found")
         if peer_session.pc.iceConnectionState in ["connected", "completed"]:
-            logger.info("ICE connected")
+            if _check_fully_connected() and peer_dependencies.on_connected_fully:
+                peer_dependencies.on_connected_fully()   # DTLS + ICE both done
+
+    @pc.on("icegatheringstatechange")  
+    def on_gathering_change():
+        logger.info(f"ICE gathering state changed: {peer_session.pc.iceGatheringState}")
         
 
     # ── Connection state change ───────────────────────────────────────────
@@ -56,10 +63,10 @@ async def create_peer(peer_dependencies: PeerDependencies):
     async def on_conn_state():
         state = pc.connectionState
         logger.info(f"Connection state: {state}")
-        if state == "connected":
-            if peer_dependencies.on_connected_fully:
+        if state in ["connected", "completed"]:
+            if _check_fully_connected() and peer_dependencies.on_connected_fully:
                 peer_dependencies.on_connected_fully()   # DTLS + ICE both done
-        if state in ("failed", "closed"):
+        if state in ["failed", "closed"]:
             _cancel_tasks(peer_session)
             if peer_dependencies.on_terminated:
                 peer_dependencies.on_terminated()

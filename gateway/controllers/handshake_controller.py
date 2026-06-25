@@ -3,7 +3,8 @@ import json
 import asyncio
 import logging
 import jwt
-from fastapi import APIRouter, Request, Depends, HTTPException, status, WebSocket, WebSocketException
+from fastapi import APIRouter, Request, Depends, HTTPException, status, WebSocket, WebSocketException, WebSocketDisconnect
+from starlette.websockets import WebSocketState
 from gateway.controllers.helper import verify_token_credentials, verify_raw_token
 from gateway.worker_router.worker_router import resolve_stream_key, AgentConfig, NoCapacityError
 from pydantic import BaseModel
@@ -115,11 +116,9 @@ class HandshakeController:
         # Gateway → Worker  (offer + client ICE)
         # Worker  → Gateway (answer + worker ICE)  ─ keyed by message type inside payload
         answer_stream_key    = f"webrtc:answer:{session_id}"
-        ice_client_stream    = f"webrtc:ice:client:{session_id}"   # client → worker (via Redis)
-        ice_worker_stream    = f"webrtc:ice:worker:{session_id}"   # worker → client (via Redis)
-
         await websocket.accept()
 
+    
         # ─────────────────────────────────────────────────────────────────────
         # INBOUND  — client → Redis
         # Reads every message the client sends and routes it to the correct
@@ -142,24 +141,14 @@ class HandshakeController:
 
                 msg_type = data.get("type")
 
-                if msg_type == "offer":
-                    logger.info(f"[{session_id}] Forwarding offer to worker")
+                if msg_type == "offer" or msg_type == "answer":
+                    logger.info(f"[{session_id}] Forwarding offer/answer to worker")
                     await redis_client.xadd(stream_key, {
                         "session_id": session_id,
                         "agent_id":   agent_id,
                         "pk_id":      str(pk_id),
                         "type":       data["type"],
                         "sdp":        data["sdp"],
-                    })
-
-                elif msg_type == "candidate":
-                    candidate = data.get("candidate", {})
-                    logger.debug(f"[{session_id}] Forwarding client ICE candidate")
-                    await redis_client.xadd(ice_client_stream, {
-                        "session_id":    session_id,
-                        "candidate":     candidate.get("candidate", ""),
-                        "sdpMid":        candidate.get("sdpMid") or "",
-                        "sdpMLineIndex": str(candidate.get("sdpMLineIndex", "")),
                     })
 
                 else:
@@ -172,73 +161,45 @@ class HandshakeController:
         # ─────────────────────────────────────────────────────────────────────
         async def outbound():
             answer_cursor = "0-0"
-            ice_cursor    = "0-0"
+            results = None
 
             while True:
                 try:
-                    # Poll both streams in a single round-trip
+                    # Polling from answer and ice streams
                     results = await redis_client.xread(
-                        {
-                            answer_stream_key: answer_cursor,
-                            ice_worker_stream: ice_cursor,
-                        },
+                        {answer_stream_key: answer_cursor },
                         count=10,
-                        block=5000,
-                    )
+                        block=200,  # block indefinitely — wait_for controls the timeout
+                    )             
+                except asyncio.TimeoutError:
+                    continue  # no messages yet, loop again
                 except asyncio.CancelledError:
-                    break
-                except Exception as e:
-                    logger.error(f"[{session_id}] Outbound Redis read error: {e}", exc_info=True)
-                    break
+                    break  # now fires correctly — wait_for re-raises it before Redis can swallow it
 
                 if not results:
                     continue
-
+                 
                 for stream_name, messages in results:
                     for msg_id, payload in messages:
                         stream_name_str = stream_name.decode() if isinstance(stream_name, bytes) else stream_name
 
                         # ── Answer ────────────────────────────────────────────
                         if stream_name_str == answer_stream_key:
-                            answer_cursor = msg_id
-
-                            # Lifecycle event — no payload field
-                            if b"event" in payload:
-                                event = payload[b"event"].decode()
-                                if event == "connected":
-                                    await websocket.close(code=1000)
-                                    return # exits outbound loop
-                                continue
-
-                            answer = json.loads(payload[b"payload"])
+                            
+                            # The answer expected should include all ICE candidates
+                            answer = json.loads(payload["payload"])
                             logger.info(f"[{session_id}] Forwarding answer to client")
                             await websocket.send_text(json.dumps({
                                 "type": answer["type"],
                                 "sdp":  answer["sdp"],
                             }))
 
-                        # ── Worker ICE candidate ──────────────────────────────
-                        elif stream_name_str == ice_worker_stream:
-                            ice_cursor = msg_id
-                            candidate_str = payload.get(b"candidate", b"").decode()
-                            logger.debug(f"[{session_id}] Forwarding worker ICE candidate to client")
-                            await websocket.send_text(json.dumps({
-                                "type": "candidate",
-                                "candidate": {
-                                    "candidate":     candidate_str,
-                                    "sdpMid":        payload.get(b"sdpMid", b"").decode() or None,
-                                    "sdpMLineIndex": int(v) if (v := payload.get(b"sdpMLineIndex", b"").decode()) else None,
-                                }
-                            }))
+                            return
 
-                            # End-of-candidates sentinel — worker is done trickling
-                            if candidate_str == "":
-                                logger.info(f"[{session_id}] Worker ICE complete — closing outbound")
-                                return
 
         # ─────────────────────────────────────────────────────────────────────
         # Run both directions concurrently.
-        # When either finishes (client disconnect or ICE complete), cancel the
+        # When either finishes (client disconnect or Answer complete), cancel the
         # other so we don't leave a dangling Redis poller or receive loop.
         # ─────────────────────────────────────────────────────────────────────
         try:
@@ -263,10 +224,8 @@ class HandshakeController:
         finally:
             logger.info(f"[{session_id}] Session ended — cleaning up")
             await redis_client.delete(answer_stream_key)
-            await redis_client.delete(ice_worker_stream)
-            await redis_client.delete(ice_client_stream)
-            if not websocket.client_state.value == 3:  # 3 = DISCONNECTED
-                await websocket.close()
+            if websocket.client_state != WebSocketState.DISCONNECTED:
+                await websocket.close() 
 
 
     

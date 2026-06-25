@@ -33,3 +33,8 @@ docker ps --format "{{json .}}" --filter "status=running"
 
 # Start a project with debug mode
 docker compose -f docker-compose.debug.yml build && docker compose -f docker-compose.debug.yml up -d
+
+
+# Monitor Redis
+docker exec -it redis sh  
+/usr/local/bin/redis-cli MONITOR | grep webrtc

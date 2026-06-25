@@ -30,11 +30,8 @@ class ConnectBtn extends HTMLElement {
 
         try {
 
-            const wsUrl = await this.getWSUrl();
-
-            console.log("RTC initialized:", wsUrl);
-
-            this.rtcController = new WebRTCController(wsUrl);
+            
+            this.rtcController = new WebRTCController();
 
             this.render();
             this.btn = this.shadowRoot.querySelector("button");

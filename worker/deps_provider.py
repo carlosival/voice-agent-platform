@@ -1,6 +1,6 @@
 from yaafpy import ExecContext
 from peer.types import PeerDependencies
-from pipelines import audio_pipeline
+from pipelines.audio_pipeline import audio_pipeline
 from workflows.utils.tools import EndConversationTool
 from workflows.utils.memory import InMemoryMemory
 from workflows.utils.observavility import get_tracer
@@ -11,6 +11,8 @@ from aiortc import RTCPeerConnection
 import logging
 from dbs_clients import redis_client
 from typing import Any
+import time
+import asyncio
 
 logger = logging.getLogger(__name__)
 
@@ -50,26 +52,22 @@ class DepProvider:
             }
         })
 
+        
         def on_connected_fully() -> None:
-            asyncio.create_task(
-                redis_client.xadd(
-                    answer_stream_key,
-                    {"event": "connected"},
-                    maxlen=10
-                )
-            )
+            pass
             
             
 
         def on_terminated() -> None:
             logger.info("Session terminated — cleaning up")
             # ctx is already in scope via closure
-            ctx.shared_data["resources"]["pc"].close()
+            asyncio.create_task(ctx.shared_data["resources"]["pc"].close())
             ctx.shared_data["resources"].pop("pc", None)    
 
         return PeerDependencies(
             ctx=ctx,
             audio_handler=audio_pipeline,
             on_connected_fully=on_connected_fully,
-            on_terminated=on_terminated
+            on_terminated=on_terminated,
+            
         )

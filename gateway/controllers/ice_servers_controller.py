@@ -24,7 +24,7 @@ if not CLOUDFLARE_ACCOUNT_ID or not CLOUDFLARE_API_TOKEN:
 
 class ICEController:
 
-    async def get_ice_servers(self, request: Request, credentials: HTTPAuthorizationCredentials= Depends(security)):
+    async def get_ice_servers(self, request: Request, credentials: HTTPAuthorizationCredentials=Depends(security)):
 
         redis_client = request.app.state.redis
         current_ip = _get_client_ip(request)
@@ -32,13 +32,21 @@ class ICEController:
         # --- Decode & validate JWT ---
         try:
             token_decoded = verify_token_credentials(credentials)
+            #Check if token is in redis with out extract it
         except Exception as e:
-            await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
-            raise e
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Session token invalid, expired, or already used.",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
 
         token_ip   = token_decoded.get("client_ip")
 
         if token_ip and token_ip != current_ip:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Session ip mismatch."
+            )
             logger.warning(
                 f"IP mismatch for session {session_id}: token={token_ip}, requester={current_ip}"
             )

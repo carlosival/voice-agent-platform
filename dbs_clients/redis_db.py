@@ -3,14 +3,14 @@ import os
 import logging
 import redis.asyncio as redis
 from redis.asyncio.client import Redis
-from typing import cast
+
 
 logger = logging.getLogger(__name__)
 
 # Example: redis://:your_strong_password@redis:6379/0
 redis_url = f'redis://:{os.getenv("REDIS_PASSWORD", None)}@{os.getenv("REDIS_HOST", "localhost")}:{os.getenv("REDIS_PORT", 6379)}/{os.getenv("REDIS_DB", 0)}'
 
-# Create the pool directly from the URL
+# 1. Ensure this is explicitly treated as an async connection pool
 pool = redis.ConnectionPool.from_url(
     redis_url,
     decode_responses=True,
@@ -20,8 +20,8 @@ pool = redis.ConnectionPool.from_url(
     health_check_interval=30,
 )
 
-
-redis_client: Redis = cast(Redis, redis.Redis(connection_pool=pool))
+# 2. Use .from_pool() instead of regular initialization to satisfy async requirements (removes need for cast)
+redis_client: Redis = Redis.from_pool(pool)
 
 async def check_redis_connection():
     """Test connection to Redis and log if it fails."""
