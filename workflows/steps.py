@@ -406,10 +406,23 @@ async def llm_stream(
         token_count = 0
         buffer = ""
         messages = build_chat_messages(await message_history.get_messages())
-        tools_schema = [get_tool_json_schema(t) for t in tools.values()]
+        # Build schema safely
+        if tools:
+            tools_schema = [get_tool_json_schema(t) for t in tools.values()]
+            print(f"DEBUG: tools_schema value is {tools_schema}")
+        else:
+            tools_schema = None
+
+        
         tool_calls_acc: dict[int, dict] = {}
+        
         try:
-            async for event in call_llm_stream_openai(messages=messages, tools=tools_schema, http_client=http_client, tracing_data={"tracer": tracer, "trace_id": trace_id, "parent_span_id": parent_span_id}):
+            async for event in call_llm_stream_openai(
+                messages=messages, 
+                tools=tools_schema if tools_schema else None, 
+                http_client=http_client, 
+                tracing_data={"tracer": tracer, "trace_id": trace_id, "parent_span_id": parent_span_id}
+                ):
                 event_type = event["type"]
                 data = event["data"]
                 

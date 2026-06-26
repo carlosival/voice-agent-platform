@@ -136,7 +136,7 @@ async def call_llm_stream_openai(
         # Stream ended cleanly -> update output data
         if span:
             span.update(output={"text": accumulated_text, "tool_calls": final_tools, "finish_reason": final_reason})
-    except CancelledError:
+    except asyncio.CancelledError:
         # User barged in and interrupted the stream
         logger.info("[LLM Engine] Stream cut short by user barge-in.")
         if span:

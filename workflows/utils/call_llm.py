@@ -12,9 +12,9 @@ logger = logging.getLogger(__name__)
 
 LLM_BASE_URL = os.getenv("LLM_BASE_URL", "http://ollama:11434/v1")
 LLM_API_KEY = os.getenv("LLM_API_KEY", "ollama")
-print(LLM_BASE_URL)
+logger.info(LLM_BASE_URL)
 LLM_MODEL    = os.getenv("LLM_MODEL", "llama3.1:8b")
-print(LLM_MODEL)
+logger.info(LLM_MODEL)
 # ─── LLM Call ────────────────────────────────────────────────────────────────
 
 
@@ -41,7 +41,7 @@ async def call_llm_stream_openai(
         "temperature": 0,
         "stream": True,
     }
-    if tools:
+    if tools and len(tools) > 0:
         kwargs["tools"] = tools
         kwargs["tool_choice"] = "auto"
 
@@ -136,7 +136,7 @@ async def call_llm_stream_openai(
         # Stream ended cleanly -> update output data
         if span:
             span.update(output={"text": accumulated_text, "tool_calls": final_tools, "finish_reason": final_reason})
-    except CancelledError:
+    except asyncio.CancelledError:
         # User barged in and interrupted the stream
         logger.info("[LLM Engine] Stream cut short by user barge-in.")
         if span:

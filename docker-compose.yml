@@ -296,6 +296,11 @@ services:
       - ai-net 
     environment:
 
+      # ── LLM ────────────────────────────────────────────────────────────────
+      LLM_BASE_URL: ${LLM_BASE_URL}
+      LLM_MODEL: ${LLM_MODEL}
+      LLM_API_KEY: ${GROQ_API_KEY}
+
       # ── LangFuse Tracing ──────────────────────────────────────────────────────────
       LANGFUSE_SECRET_KEY: ${LANGFUSE_SECRET_KEY}
       LANGFUSE_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY}

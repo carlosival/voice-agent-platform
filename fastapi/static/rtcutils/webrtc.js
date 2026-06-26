@@ -337,7 +337,8 @@ class WebRTCController {
     iceServers: config.iceServers || [
       { urls: "stun:stun.cloudflare.com:3478" },
       { urls: "stun:stun.l.google.com:19302" }
-    ]
+    ],
+    iceCandidatePoolSize: 15
   });
 
   // 2. Transceivers — pc now guaranteed to exist
