@@ -44,6 +44,12 @@ async def create_peer(peer_dependencies: PeerDependencies):
 
     # ── ICE state logging ─────────────────────────────────────────────────
 
+    @pc.on("icecandidate")
+    def on_ice_candidate(candidate):
+        logger.info(f"ICE candidate: {candidate}")
+        if peer_dependencies.on_ice_candidate:
+            peer_dependencies.on_ice_candidate(candidate)
+
     @pc.on("iceconnectionstatechange")
     async def on_ice_state():
         logger.info(f"ICE state: {peer_session.pc.iceConnectionState}")

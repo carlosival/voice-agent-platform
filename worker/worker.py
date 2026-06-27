@@ -7,6 +7,7 @@ import uuid
 import enum
 
 from aiortc import RTCPeerConnection, RTCSessionDescription, RTCIceCandidate
+from aiortc.sdp import candidate_from_sdp
 from redis.asyncio import Redis
 
 
@@ -58,6 +59,8 @@ if _missing:
 
 
 active_sessions: dict[str, PeerSession] = {}
+
+
 
 
 
@@ -121,6 +124,56 @@ def get_batch_size() -> int:
     return 10
 
 
+# ── ICE Candidate Listener ───────────────────────────────────────────────────
+async def listen_for_ice_candidates(peer_session: PeerSession, session_id: str, redis_client: Redis):
+    stream_key = f"webrtc:client:ice:{session_id}"
+    logger.info(f"Listening for client ICE candidates on {stream_key}", extra={"session_id": session_id})
+    
+    last_id = "0-0" # Start reading from the beginning of the session-specific stream
+    
+    try:
+        while True:
+            try:
+                # Poll Redis for new candidates
+                # Using xread instead of xreadgroup because these are session-specific streams
+                messages = await redis_client.xread({stream_key: last_id}, count=10, block=1000)
+                if not messages:
+                    continue
+                    
+                for stream, entries in messages:
+                    for message_id, data in entries:
+                        last_id = message_id
+                        payload = data.get("payload")
+                        if not payload:
+                            continue
+                        
+                        try:
+                            cand_data = json.loads(payload)
+                            candidate_str = cand_data.get("candidate")
+                            if candidate_str == "":
+                                await peer_session.pc.addIceCandidate(None)
+                                logger.info(f"Added end-of-candidates sentinel for session {session_id}")
+                            elif candidate_str:
+                                if candidate_str.startswith("candidate:"):
+                                    candidate_str = candidate_str[len("candidate:"):]
+                                
+                                candidate = candidate_from_sdp(candidate_str)
+                                candidate.sdpMid = cand_data.get("sdpMid")
+                                candidate.sdpMLineIndex = cand_data.get("sdpMLineIndex")
+                                
+                                await peer_session.pc.addIceCandidate(candidate)
+                                logger.info(f"Added client ICE candidate for session {session_id}")
+                        except Exception as e:
+                            logger.warning(f"Failed to process ICE candidate for session {session_id}: {e}")
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error(f"Error reading ICE candidates for session {session_id}: {e}")
+                await asyncio.sleep(1)
+    finally:
+        logger.info(f"Stopped listening for ICE candidates for session {session_id}")
+
+
 # ── Message processing ──────────────────────────────────────────────────────────
 async def process_message(
     message_id: str,
@@ -144,10 +197,17 @@ async def process_message(
         try:
 
             # ── Build peer Dependencies and Context can be as complex as needed ────────────────────────────────────────────────────
-            deps = await DepProvider.build(session_id) 
+            deps = await DepProvider.build(session_id, active_sessions=active_sessions) 
 
             peer_session = await create_peer(deps)
             active_sessions[session_id] = peer_session
+
+
+            # ── ICE Candidate Listener ────────────────────────────────────
+            ice_task = asyncio.create_task(
+                listen_for_ice_candidates(peer_session, session_id, redis_client)
+            )
+            
 
             # ── Apply remote offer ────────────────────────────────────────
             offer = RTCSessionDescription(
@@ -205,8 +265,8 @@ async def process_message(
             # Do not ack — message stays pending for reclaim
             await peer_session.pc.close()
 
-        finally:
-            active_sessions.pop(session_id, None)
+
+
             
 
 

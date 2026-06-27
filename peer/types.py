@@ -16,6 +16,8 @@ class PeerDependencies:
     on_connected_fully: Callable[[], None] = None
     on_track: Callable[[MediaStreamTrack], None] = None
     on_ice_state_change: Callable[[str], None] = None
+    on_ice_gathering_state_change: Callable[[str], None] = None
+    on_ice_candidate: Callable[[str], None] = None
     on_connection_state_change: Callable[[str], None] = None
     on_terminated: Callable[[], None] = None
     

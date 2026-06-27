@@ -115,7 +115,13 @@ class HandshakeController:
         # --- Redis stream keys ---
         # Gateway → Worker  (offer + client ICE)
         # Worker  → Gateway (answer + worker ICE)  ─ keyed by message type inside payload
-        answer_stream_key    = f"webrtc:answer:{session_id}"
+        answer_stream_key    = f"webrtc:answer:{session_id}" # worker -> client
+        ice_stream_key       = f"webrtc:client:ice:{session_id}" # client forward -> worker listen
+        ice_stream_key_worker = f"webrtc:worker:ice:{session_id}" # worker forward -> client listen
+
+        end_ice_client = False
+        end_ice_worker = False
+
         await websocket.accept()
 
     
@@ -125,6 +131,8 @@ class HandshakeController:
         # worker stream based on the "type" field.
         # ─────────────────────────────────────────────────────────────────────
         async def inbound():
+            nonlocal end_ice_client
+            nonlocal end_ice_worker
             while True:
                 try:
                     raw = await websocket.receive_text()
@@ -151,6 +159,18 @@ class HandshakeController:
                         "sdp":        data["sdp"],
                     })
 
+                elif msg_type == "candidate":
+                    logger.info(f"[{session_id}] Forwarding candidate to worker")
+                    cand_data = data.get("candidate")
+                    if cand_data and cand_data.get("candidate") == "":
+                        end_ice_client = True
+                        if end_ice_worker:
+                            return 
+                    
+                    await redis_client.xadd(ice_stream_key, {
+                        "payload": json.dumps(cand_data)
+                    })
+
                 else:
                     logger.warning(f"[{session_id}] Unknown message type from client: {msg_type!r}")
 
@@ -161,13 +181,16 @@ class HandshakeController:
         # ─────────────────────────────────────────────────────────────────────
         async def outbound():
             answer_cursor = "0-0"
+            ice_cursor = "0-0"
+            nonlocal end_ice_client
+            nonlocal end_ice_worker
             results = None
 
             while True:
                 try:
-                    # Polling from answer and ice streams
+                    # Polling from worker answer and ice streams
                     results = await redis_client.xread(
-                        {answer_stream_key: answer_cursor },
+                        {answer_stream_key: answer_cursor, ice_stream_key_worker: ice_cursor},
                         count=10,
                         block=200,  # block indefinitely — wait_for controls the timeout
                     )             
@@ -194,7 +217,20 @@ class HandshakeController:
                                 "sdp":  answer["sdp"],
                             }))
 
-                            return
+                        # ── ICE ────────────────────────────────────────────
+                        elif stream_name_str == ice_stream_key_worker:
+                            ice_candidate = json.loads(payload["payload"])
+                            logger.info(f"[{session_id}] Forwarding ICE candidate to client")
+
+                            await websocket.send_text(json.dumps({
+                                "type": ice_candidate["type"],
+                                "candidate":  ice_candidate["candidate"],
+                            }))
+
+                            if ice_candidate["candidate"] == "":
+                                end_ice_worker = True
+                                if end_ice_client:
+                                    return
 
 
         # ─────────────────────────────────────────────────────────────────────
@@ -224,6 +260,8 @@ class HandshakeController:
         finally:
             logger.info(f"[{session_id}] Session ended — cleaning up")
             await redis_client.delete(answer_stream_key)
+            await redis_client.delete(ice_stream_key)
+            await redis_client.delete(ice_stream_key_worker)
             if websocket.client_state != WebSocketState.DISCONNECTED:
                 await websocket.close() 
 
