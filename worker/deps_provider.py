@@ -9,6 +9,7 @@ from workflows import AudioOutputTrack
 from httpx import AsyncClient
 from aiortc import RTCPeerConnection, RTCIceCandidate
 from aiortc.sdp import candidate_to_sdp
+from peer.types import PeerSession
 import logging
 import json
 from dbs_clients import redis_client

@@ -13,6 +13,8 @@ logger = logging.getLogger(__name__)
 
 ALGORITHM = os.getenv("ALGORITHM", "HS256")
 SECRET_KEY = os.getenv("GATEWAY_SECRET_KEY")
+_CLIENT_MSG_TIMEOUT_S = 10.0
+_WORKER_TOTAL_TIMEOUT_S = 60.0
 
 if not SECRET_KEY:
     raise RuntimeError("GATEWAY_SECRET_KEY environment variable is not set.")
@@ -97,6 +99,7 @@ class HandshakeController:
             regions=regions,
         )
 
+        # --- Resolve target worker stream ---
         try:
             stream_key = await resolve_stream_key(agent, current_ip, redis_client)
             if not stream_key:
@@ -113,158 +116,158 @@ class HandshakeController:
             raise WebSocketException(code=status.WS_1011_INTERNAL_ERROR, reason="Internal routing failure.")
 
         # --- Redis stream keys ---
-        # Gateway → Worker  (offer + client ICE)
-        # Worker  → Gateway (answer + worker ICE)  ─ keyed by message type inside payload
-        answer_stream_key    = f"webrtc:answer:{session_id}" # worker -> client
-        ice_stream_key       = f"webrtc:client:ice:{session_id}" # client forward -> worker listen
+        answer_stream_key    = f"webrtc:answer:{session_id}" # worker forward -> client listen
+        ice_stream_key_client       = f"webrtc:client:ice:{session_id}" # client forward -> worker listen
         ice_stream_key_worker = f"webrtc:worker:ice:{session_id}" # worker forward -> client listen
 
-        end_ice_client = False
-        end_ice_worker = False
+
+        state = {
+            "answer_sent":     False,
+            "client_ice_done": False,
+            "answer_cursor":   "0-0",
+            "ice_cursor":      "0-0",
+        }
 
         await websocket.accept()
 
-    
-        # ─────────────────────────────────────────────────────────────────────
-        # INBOUND  — client → Redis
-        # Reads every message the client sends and routes it to the correct
-        # worker stream based on the "type" field.
-        # ─────────────────────────────────────────────────────────────────────
-        async def inbound():
-            nonlocal end_ice_client
-            nonlocal end_ice_worker
-            while True:
-                try:
-                    raw = await websocket.receive_text()
+        # Define an isolated task to handle incoming WebSocket messages from the client
+        async def listen_to_client():
+            try:
+                while True:
+                    raw = await asyncio.wait_for(
+                            websocket.receive_text(),
+                            timeout=_CLIENT_MSG_TIMEOUT_S,
+                        )
                     data = json.loads(raw)
-                except json.JSONDecodeError as e:
-                    logger.warning(f"[{session_id}] Invalid JSON from client: {e}")
-                    continue
-                except WebSocketDisconnect:
-                    logger.info(f"[{session_id}] Client disconnected (inbound)")
-                    break
-                except Exception as e:
-                    logger.error(f"[{session_id}] Inbound error: {e}", exc_info=True)
-                    break
+                    msg_type = data.get("type")
 
-                msg_type = data.get("type")
+                    if msg_type in ("offer", "answer"):
+                        logger.info(f"[{session_id}] Reading offer/answer from client sending to worker")
+                        await redis_client.xadd(stream_key, {
+                            "session_id": session_id,
+                            "agent_id":   agent_id,
+                            "pk_id":      str(pk_id),
+                            "type":       data["type"],
+                            "sdp":        data["sdp"],
+                        })
 
-                if msg_type == "offer" or msg_type == "answer":
-                    logger.info(f"[{session_id}] Forwarding offer/answer to worker")
-                    await redis_client.xadd(stream_key, {
-                        "session_id": session_id,
-                        "agent_id":   agent_id,
-                        "pk_id":      str(pk_id),
-                        "type":       data["type"],
-                        "sdp":        data["sdp"],
-                    })
+                    elif msg_type == "candidate":
+                        logger.info(f"[{session_id}] Reading ICE candidate from client sending to worker")
+                        cand_data = data.get("candidate")
+                        
+                        await redis_client.xadd(ice_stream_key_client, {
+                            "payload": json.dumps(cand_data)
+                        })
 
-                elif msg_type == "candidate":
-                    logger.info(f"[{session_id}] Forwarding candidate to worker")
-                    cand_data = data.get("candidate")
-                    if cand_data and cand_data.get("candidate") == "":
-                        end_ice_client = True
-                        if end_ice_worker:
-                            return 
-                    
-                    await redis_client.xadd(ice_stream_key, {
-                        "payload": json.dumps(cand_data)
-                    })
+                        # Check if browser is signaling End-of-Candidates
+                        if cand_data is None or cand_data.get("candidate") == "":
+                            logger.info(f"[{session_id}] Browser finished sending ICE candidates.")
+                            state["client_ice_done"] = True
+                    else:
+                        logger.warning(f"[{session_id}] Unknown message type from client: {msg_type!r}")
+            except WebSocketDisconnect:
+                logger.info("Client disconnected naturally.")
+            except Exception as e:
+                logger.error(f"Error in client listener: {e}")
 
-                else:
-                    logger.warning(f"[{session_id}] Unknown message type from client: {msg_type!r}")
-
-        # ─────────────────────────────────────────────────────────────────────
-        # OUTBOUND — Redis → client
-        # Polls both worker streams (answer + worker ICE) and forwards each
-        # message to the client in the original format the client expects.
-        # ─────────────────────────────────────────────────────────────────────
-        async def outbound():
-            answer_cursor = "0-0"
-            ice_cursor = "0-0"
-            nonlocal end_ice_client
-            nonlocal end_ice_worker
-            results = None
-
-            while True:
-                try:
-                    # Polling from worker answer and ice streams
+        # Define an isolated task to read from Redis and push to the client WebSocket
+        async def _polling_worker_loop():
+            try:
+                while True:
+                    # Polling or listen from worker's answers and ice streams
                     results = await redis_client.xread(
-                        {answer_stream_key: answer_cursor, ice_stream_key_worker: ice_cursor},
+                        {answer_stream_key: state["answer_cursor"], ice_stream_key_worker: state["ice_cursor"]},
                         count=10,
-                        block=200,  # block indefinitely — wait_for controls the timeout
-                    )             
-                except asyncio.TimeoutError:
-                    continue  # no messages yet, loop again
-                except asyncio.CancelledError:
-                    break  # now fires correctly — wait_for re-raises it before Redis can swallow it
+                        block=1000,  # Block for up to 1 second if no data to save CPU loops
+                    ) 
+                    
+                    if not results:
+                        continue
 
-                if not results:
-                    continue
-                 
-                for stream_name, messages in results:
-                    for msg_id, payload in messages:
+                    for stream_name, messages in results:
                         stream_name_str = stream_name.decode() if isinstance(stream_name, bytes) else stream_name
 
-                        # ── Answer ────────────────────────────────────────────
-                        if stream_name_str == answer_stream_key:
-                            
-                            # The answer expected should include all ICE candidates
-                            answer = json.loads(payload["payload"])
-                            logger.info(f"[{session_id}] Forwarding answer to client")
-                            await websocket.send_text(json.dumps({
-                                "type": answer["type"],
-                                "sdp":  answer["sdp"],
-                            }))
+                        for msg_id, payload in messages:
+                            # CRITICAL: Decode the message ID to update the cursor
+                            msg_id_str = msg_id.decode() if isinstance(msg_id, bytes) else msg_id
 
-                        # ── ICE ────────────────────────────────────────────
-                        elif stream_name_str == ice_stream_key_worker:
-                            ice_candidate = json.loads(payload["payload"])
-                            logger.info(f"[{session_id}] Forwarding ICE candidate to client")
-
-                            await websocket.send_text(json.dumps({
-                                "type": ice_candidate["type"],
-                                "candidate":  ice_candidate["candidate"],
-                            }))
-
-                            if ice_candidate["candidate"] == "":
-                                end_ice_worker = True
-                                if end_ice_client:
+                            # ── Answer ────────────────────────────────────────────
+                            if stream_name_str == answer_stream_key:
+                                state["answer_cursor"] = msg_id_str  # Advance cursor so we don't reread it!
+                                
+                                if not state["answer_sent"]:
+                                    answer = json.loads(payload["payload"])
+                                    logger.info(f"[{session_id}] Reading answer from worker sending to client")
+                                    await websocket.send_text(json.dumps({
+                                        "type": answer["type"],
+                                        "sdp":  answer["sdp"],
+                                    }))
+                                    state["answer_sent"] = True  # Block further duplicate answers
                                     return
 
+                            # ── ICE ────────────────────────────────────────────
+                            elif stream_name_str == ice_stream_key_worker:
+                                # Note: aiortc won't usually hit this block because of Vanilla SDP
+                                state["ice_cursor"] = msg_id_str  # Advance cursor!   
+                                ice_candidate = json.loads(payload["payload"])
+                                logger.info(f"[{session_id}] Reading ICE candidate from worker sending to client")
 
-        # ─────────────────────────────────────────────────────────────────────
-        # Run both directions concurrently.
-        # When either finishes (client disconnect or Answer complete), cancel the
-        # other so we don't leave a dangling Redis poller or receive loop.
-        # ─────────────────────────────────────────────────────────────────────
+                                await websocket.send_text(json.dumps({
+                                    "type": ice_candidate["type"],
+                                    "candidate":  ice_candidate["candidate"],
+                                }))
+                                
+                                # Since aiortc generates a consolidated SDP answer, 
+                                # your end_ice checks can trigger here if null candidates are passed.
+                                if ice_candidate.get("candidate") == "":
+                                    logger.info("Worker reached end-of-candidates.")
+                                    return
+
+            except Exception as e:
+                logger.error(f"Error in worker listener: {e}")
+
+        async def listen_to_worker() -> None:
+            try:
+                await asyncio.wait_for(
+                    _polling_worker_loop(),
+                    timeout=_WORKER_TOTAL_TIMEOUT_S,
+                )
+            except asyncio.TimeoutError:
+                logger.error("[%s] Worker timed out after %ss — no answer or ICE never completed.", session_id, _WORKER_TOTAL_TIMEOUT_S)
+            except Exception as exc:
+                logger.error("[%s] Error in worker listener: %s", session_id, exc)
+
         try:
-            inbound_task  = asyncio.create_task(inbound())
-            outbound_task = asyncio.create_task(outbound())
+            
+            #Listen for worker data (answer and ice)-> send to client  and forward client data to worker.
+            while True:
 
-            done, pending = await asyncio.wait(
-                {inbound_task, outbound_task},
-                return_when=asyncio.FIRST_COMPLETED,
-            )
+                # Run both loops concurrently. If either finishes (or fails), cancel the other.
+                await asyncio.gather(
+                    listen_to_client(),
+                    listen_to_worker(),
+                    return_exceptions=True
+                )
 
-            for task in pending:
-                task.cancel()
-                try:
-                    await task
-                except asyncio.CancelledError:
-                    pass
-
-        except Exception as e:
-            logger.error(f"[{session_id}] ws_handshake error: {e}", exc_info=True)
-
+            
+        except WebSocketDisconnect:
+            logger.info("Client disconnected naturally from inbound loop.")
+        
         finally:
-            logger.info(f"[{session_id}] Session ended — cleaning up")
-            await redis_client.delete(answer_stream_key)
-            await redis_client.delete(ice_stream_key)
-            await redis_client.delete(ice_stream_key_worker)
-            if websocket.client_state != WebSocketState.DISCONNECTED:
-                await websocket.close() 
-
+            logger.info("Session Handshake ended — cleaning queues")
+            await asyncio.gather(
+                redis_client.delete(answer_stream_key),
+                redis_client.delete(ice_stream_key_client),
+                redis_client.delete(ice_stream_key_worker),
+                return_exceptions=True,
+            )
+            try:
+                # Check the Starlette internal state to prevent calling send on a closed socket
+                if websocket.client_state != starlette.websockets.WebSocketState.DISCONNECTED:
+                    await websocket.close()
+            except RuntimeError as e:
+                # Catch "Cannot call send once a close message has been sent"
+                logger.debug(f"Socket close skipped or already closing: {e}")
 
     
     async def handshake(self, request: Request, offer: WebRTCOffer, credentials) -> dict:
