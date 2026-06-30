@@ -1,0 +1,97 @@
+# ──────────────────────────────────────────────────────────────────────────
+  # 1. API Gateway
+  # ──────────────────────────────────────────────────────────────────────────
+  gateway:
+    build:
+      context: .
+      dockerfile: gateway/Dockerfile
+    image: voice-gateway:latest
+    container_name: gateway
+    restart: unless-stopped
+    networks:
+      - ai-net 
+    ports:
+      - "8080:8080"
+    environment:
+      DOMAIN: ${DOMAIN}
+      
+      # ── Database ──────────────────────────────────────────────────────────
+      POSTGRES_HOST: "postgres"
+      POSTGRES_PORT: "5432"
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_URL: "postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}"
+
+      # ── Redis ──────────────────────────────────────────────────────────
+      REDIS_HOST: "redis"
+      REDIS_PORT: "6379"
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      REDIS_DB: ${REDIS_DB}  
+      REDIS_URL: "redis://:${REDIS_PASSWORD}@redis:6379/${REDIS_DB}"
+
+      # ── Cloudflare / Security ─────────────────────────────────────────────
+      CLOUDFLARE_API_TOKEN: ${CLOUDFLARE_API_TOKEN}
+      CLOUDFLARE_ACCOUNT_ID: ${CLOUDFLARE_ACCOUNT_ID}
+      GATEWAY_SECRET_KEY: ${GATEWAY_SECRET_KEY}
+      ALGORITHM: ${ALGORITHM}
+      TOKEN_EXPIRATION_SECONDS: ${TOKEN_EXPIRATION_SECONDS}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "python3 -c \"import urllib.request; urllib.request.urlopen('http://localhost:8080/v1/health/ping')\""]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# 5. Database Utilities (Triggered via Profiles)
+# ──────────────────────────────────────────────────────────────────────────
+  init_db:
+    profiles: ["tools"]
+    build:
+      context: .
+      dockerfile: gateway/Dockerfile
+    networks:
+      - ai-net 
+    depends_on:
+      - postgres
+    command: python /app/gateway/db/init_db.py
+    environment:
+      PYTHONPATH: /app
+      POSTGRES_HOST: "postgres"
+      POSTGRES_PORT: "5432"
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_URL: "postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}"
+      CLOUDFLARE_API_TOKEN: ${CLOUDFLARE_API_TOKEN}
+      CLOUDFLARE_ACCOUNT_ID: ${CLOUDFLARE_ACCOUNT_ID}
+
+  seed_db:
+    profiles: ["tools"]
+    build:
+      context: .
+      dockerfile: gateway/Dockerfile
+    networks:
+      - ai-net 
+    depends_on:
+      init_db:
+        condition: service_completed_successfully
+    command: python /app/gateway/db/seed.py
+    environment:
+      PYTHONPATH: /app
+      POSTGRES_HOST: "postgres"
+      POSTGRES_PORT: "5432"
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_URL: "postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}"
+      CLOUDFLARE_API_TOKEN: ${CLOUDFLARE_API_TOKEN}
+      CLOUDFLARE_ACCOUNT_ID: ${CLOUDFLARE_ACCOUNT_ID}
+      DOMAIN: ${DOMAIN}

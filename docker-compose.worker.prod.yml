@@ -1,0 +1,50 @@
+# ──────────────────────────────────────────────────────────────────────────
+  # 2. Worker 1
+  # ──────────────────────────────────────────────────────────────────────────
+  worker-1:
+    build:
+      context: .
+      dockerfile: worker/Dockerfile
+    image: voice-worker:latest
+    container_name: worker-1
+    restart: unless-stopped
+    networks:
+      - ai-net 
+    environment:
+      LLM_BASE_URL: ${LLM_BASE_URL}
+      LLM_MODEL: ${LLM_MODEL}
+      LLM_API_KEY: ${GROQ_API_KEY}
+
+      LANGFUSE_SECRET_KEY: ${LANGFUSE_SECRET_KEY}
+      LANGFUSE_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY}
+      LANGFUSE_BASE_URL: ${LANGFUSE_BASE_URL}
+      
+      # ── Database ──────────────────────────────────────────────────────────
+      POSTGRES_HOST: "postgres"
+      POSTGRES_PORT: "5432"
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_URL: "postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}"
+
+      # ── Redis ──────────────────────────────────────────────────────────
+      REDIS_HOST: "redis"
+      REDIS_PORT: "6379"
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      REDIS_DB: ${REDIS_DB}  
+      REDIS_URL: "redis://:${REDIS_PASSWORD}@redis:6379/${REDIS_DB}"
+
+      CLOUDFLARE_API_TOKEN: ${CLOUDFLARE_API_TOKEN}
+      CLOUDFLARE_ACCOUNT_ID: ${CLOUDFLARE_ACCOUNT_ID}
+      TIER: standard
+      REGION: eu-west-1
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import sys; sys.exit(0)"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    stop_grace_period: 30s
