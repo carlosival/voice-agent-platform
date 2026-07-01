@@ -126,8 +126,6 @@ services:
       dockerfile: gateway/Dockerfile
     networks:
       - ai-net 
-    depends_on:
-      - postgres
     command: python /app/gateway/db/init_db.py
     environment:
       PYTHONPATH: /app
@@ -150,9 +148,6 @@ services:
       dockerfile: gateway/Dockerfile
     networks:
       - ai-net 
-    depends_on:
-      init_db:
-        condition: service_completed_successfully
     command: python /app/gateway/db/seed.py
     environment:
       PYTHONPATH: /app
