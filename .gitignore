@@ -2,6 +2,8 @@ fastapi/static/stt_debug
 fastapi/static/tts_debug
 speaches
 scripts/export_sec.sh
+scripts/export_sec_prod.sh
+scripts/export_sec_dev.sh
 gateway/worker_router/GeoLite2-City.mmdb
 .env
 __pycache__

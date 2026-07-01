@@ -43,7 +43,7 @@ async def call_stt_openai(http_client: AsyncClient, audio: bytes, is_wav: bool =
     """
     wav_bytes = audio if is_wav else pcm_to_wav(audio)
 
-    # 1. Groq requires an Authorization header with your API key
+    # 1. Groq, OpenAI, Speaches, etc. requires an Authorization header with your API key
     headers = {
         "Authorization": f"Bearer {STT_API_KEY}"
     }

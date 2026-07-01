@@ -13,6 +13,7 @@ curl -s "https://huggingface.co/api/models?search=piper&author=speaches-ai" | py
 # List available models STT and TTS
 curl http://localhost:8000/v1/models | python3 -m json.tool
 
+
 # Generate TTS audio
 curl http://localhost:8000/v1/audio/speech   -H "Content-Type: application/json"   -d '{"model":"speaches-ai/piper-es_ES-sharvard-medium","input":"Esta es una prueba con piper usando CPU","voice":"sharvard"}'   --output test_output.wav
 

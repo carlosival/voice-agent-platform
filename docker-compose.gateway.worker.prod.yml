@@ -23,6 +23,27 @@ services:
       - "8080:8080"
     environment:
       DOMAIN: ${DOMAIN}
+
+      # ── TTS ────────────────────────────────────────────────────────────────
+      TTS_BASE_URL: ${TTS_BASE_URL}
+      TTS_MODEL: ${TTS_MODEL}
+      TTS_VOICE: ${TTS_VOICE}
+      TTS_API_KEY: ${TTS_API_KEY}
+
+      # ── STT ────────────────────────────────────────────────────────────────
+      STT_BASE_URL: ${STT_BASE_URL}
+      STT_MODEL: ${STT_MODEL}
+      STT_LANGUAGE: ${STT_LANGUAGE}
+      STT_API_KEY: ${STT_API_KEY}
+
+      # ── LLM ────────────────────────────────────────────────────────────────
+      LLM_BASE_URL: ${LLM_BASE_URL}
+      LLM_MODEL: ${LLM_MODEL}
+      LLM_API_KEY: ${LLM_API_KEY}
+
+      LANGFUSE_SECRET_KEY: ${LANGFUSE_SECRET_KEY}
+      LANGFUSE_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY}
+      LANGFUSE_BASE_URL: ${LANGFUSE_BASE_URL}
       
       # ── Database ──────────────────────────────────────────────────────────
       POSTGRES_HOST: "postgres"
@@ -70,6 +91,18 @@ services:
     networks:
       - ai-net 
     environment:
+      # ── TTS ────────────────────────────────────────────────────────────────
+      TTS_BASE_URL: ${TTS_BASE_URL}
+      TTS_MODEL: ${TTS_MODEL}
+      TTS_VOICE: ${TTS_VOICE}
+
+      # ── STT ────────────────────────────────────────────────────────────────
+      STT_BASE_URL: ${STT_BASE_URL}
+      STT_MODEL: ${STT_MODEL}
+      STT_LANGUAGE: ${STT_LANGUAGE}
+      STT_API_KEY: ${GROQ_API_KEY}
+
+      # ── LLM ────────────────────────────────────────────────────────────────
       LLM_BASE_URL: ${LLM_BASE_URL}
       LLM_MODEL: ${LLM_MODEL}
       LLM_API_KEY: ${GROQ_API_KEY}
@@ -95,8 +128,8 @@ services:
 
       CLOUDFLARE_API_TOKEN: ${CLOUDFLARE_API_TOKEN}
       CLOUDFLARE_ACCOUNT_ID: ${CLOUDFLARE_ACCOUNT_ID}
-      TIER: standard
-      REGION: eu-west-1
+      TIER: ${TIER}
+      REGION: ${REGION}
     depends_on:
       redis:
         condition: service_healthy

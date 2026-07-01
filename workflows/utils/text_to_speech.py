@@ -12,8 +12,7 @@ import logging
 from .helpers import save_debug_wav
 
 
-# Use the beta client as it includes the latest streaming and model capabilities
-from google.cloud import texttospeech_v1 as texttospeech
+TTS_API_KEY = os.getenv("TTS_API_KEY", "dummy_key")
 
 logger = logging.getLogger(__name__)
 
@@ -97,11 +96,17 @@ async def call_tts_stream(
         Path(debug_path).parent.mkdir(parents=True, exist_ok=True)
         print(f"\n── Test 4 Debug Mode Enabled ──")
 
+    # 1. Speaches, Groq, OpenAI, etc. requires an Authorization header with your API key
+    headers = {
+        "Authorization": f"Bearer {TTS_API_KEY}"
+    }
+
     # API Request
     # Note: Use response_format="pcm" for raw data to avoid manual header stripping
     async with http_client.stream(
         "POST",
         f"{TTS_BASE_URL}/v1/audio/speech",
+        headers=headers,  # ← Added headers
         json={
             "model": TTS_MODEL,
             "input": text,
