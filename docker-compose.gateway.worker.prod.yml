@@ -45,11 +45,6 @@ services:
       GATEWAY_SECRET_KEY: ${GATEWAY_SECRET_KEY}
       ALGORITHM: ${ALGORITHM}
       TOKEN_EXPIRATION_SECONDS: ${TOKEN_EXPIRATION_SECONDS}
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "python3 -c \"import urllib.request; urllib.request.urlopen('http://localhost:8080/v1/health/ping')\""]
       interval: 15s
@@ -70,7 +65,7 @@ services:
     networks:
       - ai-net 
     environment:
-    
+
       # ── TTS ────────────────────────────────────────────────────────────────
       TTS_BASE_URL: ${TTS_BASE_URL}
       TTS_MODEL: ${TTS_MODEL}
@@ -111,9 +106,6 @@ services:
       CLOUDFLARE_ACCOUNT_ID: ${CLOUDFLARE_ACCOUNT_ID}
       TIER: ${TIER}
       REGION: ${REGION}
-    depends_on:
-      redis:
-        condition: service_healthy
     healthcheck:
       test: ["CMD", "python", "-c", "import sys; sys.exit(0)"]
       interval: 10s
