@@ -195,17 +195,18 @@ services:
       TTS_BASE_URL: ${TTS_BASE_URL}
       TTS_MODEL: ${TTS_MODEL}
       TTS_VOICE: ${TTS_VOICE}
+      TTS_API_KEY: ${TTS_API_KEY}
 
       # ── STT ────────────────────────────────────────────────────────────────
       STT_BASE_URL: ${STT_BASE_URL}
       STT_MODEL: ${STT_MODEL}
       STT_LANGUAGE: ${STT_LANGUAGE}
-      STT_API_KEY: ${GROQ_API_KEY}
+      STT_API_KEY: ${STT_API_KEY}
 
       # ── LLM ────────────────────────────────────────────────────────────────
       LLM_BASE_URL: ${LLM_BASE_URL}
       LLM_MODEL: ${LLM_MODEL}
-      LLM_API_KEY: ${GROQ_API_KEY}
+      LLM_API_KEY: ${LLM_API_KEY}
 
       # ── Google Search Tool ──────────────────────────────────────────────────────────
       SERPER_API_KEY: ${SERPER_API_KEY}
