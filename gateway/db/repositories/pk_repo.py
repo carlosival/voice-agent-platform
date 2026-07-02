@@ -13,6 +13,7 @@ class PKRepository:
 
     async def check_pk(self, pk: str, client_origin: str) -> Optional[UserPublicKey]:
         try:
+            logger.info(f"Checking PK: {pk} for client origin: {client_origin}")
             async with self.db.begin():
                 # 1. Look up the key and confirm domain authorization
                 stmt = select(UserPublicKey).where(

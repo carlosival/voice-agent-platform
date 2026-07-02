@@ -1,4 +1,5 @@
-const BASE_URL = window.location.origin;
+const env = 'dev';
+const BASE_URL = env === 'prod' ? 'https://cadoflow.xyz' : window.location.origin;
 const INIT_URL = `${BASE_URL}/v1/api/get_token`;
 const GET_ICE_SERVERS = `${BASE_URL}/v1/api/get_ice_servers`;
 
