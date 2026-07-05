@@ -20,7 +20,7 @@ docker compose up -d
 docker compose down
 
 # See docker containers's inside folder structure
-docker compose run --rm {container_name} find . -maxdepth 3
+docker compose run --rm <container_name> find . -maxdepth 3
 
 # Inpect docker container network
 docker inspect <container_name> | grep -i "NetworkSettings" -A 10
@@ -34,6 +34,8 @@ docker ps --format "{{json .}}" --filter "status=running"
 # Start a project with debug mode
 docker compose -f docker-compose.debug.yml build && docker compose -f docker-compose.debug.yml up -d
 
+# Print environment variables
+docker exec -it <container_name> printenv
 
 # Monitor Redis
 docker exec -it redis sh  
