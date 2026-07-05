@@ -17,7 +17,11 @@ LLM_MODEL    = os.getenv("LLM_MODEL", "llama3.1:8b")
 logger.info(LLM_MODEL)
 # ─── LLM Call ────────────────────────────────────────────────────────────────
 
-
+'''
+    This layer send all info the llm needs, prompt,tools, messages, etc 
+    and handle all type of response's tokens, content, tools_call, reasoning, etc.
+    How to setup and handle the response is tight coupling with the LLM Provider.
+'''
 async def call_llm_stream_openai(
     messages: list,
     tools: Optional[list] = None,
@@ -26,7 +30,7 @@ async def call_llm_stream_openai(
 ) -> AsyncGenerator[dict, None]:
     """
     Async streaming using AsyncOpenAI client style.
-    Yields dicts with type: 'token' | 'tool_call' | 'finish'.
+    Yields dicts with type: 'token' | 'tool_call' | 'finish'. Handle more as needed.
     """
     if http_client is None:
         http_client = AsyncClient(timeout=30.0)
@@ -69,7 +73,7 @@ async def call_llm_stream_openai(
             trace_context={"trace_id": trace_id, "parent_span_id": parent_span_id}  # Links cleanly as a child under the WebRTC session
         )
 
-    accumulated_text = ""
+    accumulated_text = "" # Only for debug pourposes yield individual token
     # Track accumulated tool calls by their delta index
     accumulated_tools = {}
     final_reason = "unknown"

@@ -380,6 +380,34 @@ async def stt(
 # ════════════════════════════════════════════════════════════════════════════════
 
 SENTENCE_ENDS = {",", ".",  "\n", "\r", "\n\n", "\r\n", "!", "?", "…", "。"}
+BAD_PATTERNS = [
+            r"\*\*.*?\*\*",          # Markdown bold
+            r"\#+ .*",               # Markdown headers
+            r"<[^>]*>",              # XML/HTML tags (like <function=...></function>)
+            r"\[.*?\]",              # Bracketed text annotations
+            r"`{1,3}.*?`{1,3}",      # Code snippets
+        ]
+
+def sanitize_sentence(text: str) -> str:
+        """
+        Cleans up a complete sentence before handing it to the TTS engine.
+        """
+        if not text:
+            return ""
+        
+        # 1. Remove systemic noise, tags, and markdown formatting
+        cleaned = text
+        for pattern in BAD_PATTERNS:
+            cleaned = re.sub(pattern, "", cleaned)
+            
+        # 2. Normalize text numbers or symbols that sound weird when spoken
+        cleaned = cleaned.replace("%", " por ciento")
+        cleaned = cleaned.replace("&", " y ")
+        
+        # 3. Clean up accidental double spaces left behind by removals
+        cleaned = re.sub(r"\s+", " ", cleaned).strip()
+        
+        return cleaned
 
 async def llm_stream(
     source: AsyncGenerator,
@@ -438,7 +466,21 @@ async def llm_stream(
 
                     if buffer.rstrip() and buffer.rstrip()[-1] in SENTENCE_ENDS:
                             logger.info(f"[llm_stream] Flushing sentence: '{buffer.strip()}'")
-                            sentence_queue.put_nowait(buffer.strip())
+                            raw_sentence = buffer.strip()
+                
+                            # Apply the broad voice sanitization
+                            clean_sentence = sanitize_sentence(raw_sentence)
+                            
+                            # Crucial Voice Safety Check: 
+                            # If the LLM only outputted an XML tag (like <function=end_conversation></function>),
+                            # the clean_sentence will now be empty "". We must NOT queue empty text to TTS.
+                            if clean_sentence:
+                                logger.info(f"[llm_stream] Flushing sentence: '{clean_sentence}' (Raw: '{raw_sentence}')")
+                                sentence_queue.put_nowait(clean_sentence)
+                            else:
+                                logger.warning(f"[llm_stream] Dropped hallucinated syntax chunk: '{raw_sentence}'")
+                            
+                            # Always reset the buffer regardless
                             buffer = ""
                 # ─────────────────────────────────────────────
                 # TOOL CALL REDUCTION
