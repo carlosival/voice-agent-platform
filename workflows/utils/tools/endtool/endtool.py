@@ -10,6 +10,7 @@ class EndConversationTool(Tool):
         "confirm": {
             "type": "string",
             "description": "Set to True to confirm closing the chat session.",
+            "nullable": True
         }
         }  # required even if empty
     output_type = "any"
