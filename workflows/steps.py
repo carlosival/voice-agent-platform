@@ -670,7 +670,9 @@ async def llm_stream(
         logger.info("LLM: Producer cancelled.")
         raise  # let it propagate cleanly
     except Exception as e:
-        logger.error(f"LLM: Unexpected error in producer: {str(e)}")
+        logger.error(f"LLM: Unexpected error in producer: {type(e).__name__}: {e!r}")
+        # or even better, get the traceback:
+        logger.exception("LLM: Unexpected error in producer")
         yield "Hubo un error inesperado."
     finally:
         # Cleanup task if it was orphaned by an error or cancellation
