@@ -143,16 +143,14 @@ class HandshakeController:
 
                     if msg_type in ("offer", "answer"):
                         logger.info(f"[{session_id}] Reading offer/answer from client sending to worker")
-                        async with redis_client.pipeline(transaction=True) as pipe:
-                            pipe.xadd(stream_key, {
+                        await redis_client.xadd(stream_key, {
                             "session_id": session_id,
                             "agent_id":   agent_id,
                             "pk_id":      str(pk_id),
                             "type":       data["type"],
                             "sdp":        data["sdp"],
                             })
-                            pipe.expire(stream_key, 600)  # adjust TTL as needed
-                            await pipe.execute()
+
 
                     elif msg_type == "candidate":
                         logger.info(f"[{session_id}] Reading ICE candidate from client sending to worker")
@@ -362,16 +360,13 @@ class HandshakeController:
 
         answer_stream_key = f"webrtc:answer:{session_id}"
  
-        async with redis_client.pipeline(transaction=True) as pipe:
-            pipe.xadd(stream_key, {
+        await redis_client.xadd(stream_key, {
                 "session_id": session_id,
                 "agent_id": agent_id,
                 "pk_id": pk_id,
                 "type": offer_type,
                 "sdp": offer_sdp,
             })
-            pipe.expire(stream_key, 600)  # adjust TTL as needed
-            await pipe.execute()
  
         # --- Wait for worker answer, then cleanup ---
         try:
