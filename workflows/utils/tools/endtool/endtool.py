@@ -15,5 +15,9 @@ class EndConversationTool(Tool):
         }  # required even if empty
     output_type = "any"
 
-    def forward(self, confirm: bool = True) -> Any:
+    def forward(self, confirm: Union[bool, str] = True) -> Any:
+        # Robust parsing: handle if LLM passes string "true", "True", "false", etc.
+        if isinstance(confirm, str):
+            logger.warning(f"[EndConversationTool] Received 'confirm' as string: {repr(confirm)}. Normalizing...")
+            confirm = confirm.lower().strip() in ("true", "1", "yes")
         return EndOfStream()
