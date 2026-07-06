@@ -228,13 +228,16 @@ async def process_message(
 
 
             # ── iortc get all candidates when setLocalDescription is finish sdp contains all ice candidates ─────
-            await redis_client.xadd(
+            async with redis_client.pipeline(transaction=True) as pipe:
+                pipe.xadd(
                     f"webrtc:answer:{session_id}",
                     {"payload": json.dumps({
                         "type": peer_session.pc.localDescription.type,
-                        "sdp":  peer_session.pc.localDescription.sdp,
+                        "sdp": peer_session.pc.localDescription.sdp,
                     })}
                 )
+                pipe.expire(f"webrtc:answer:{session_id}", 360)
+                await pipe.execute()
 
 
             # ── Ack only on success ───────────────────────────────────────

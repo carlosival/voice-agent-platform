@@ -143,21 +143,26 @@ class HandshakeController:
 
                     if msg_type in ("offer", "answer"):
                         logger.info(f"[{session_id}] Reading offer/answer from client sending to worker")
-                        await redis_client.xadd(stream_key, {
+                        async with redis_client.pipeline(transaction=True) as pipe:
+                            pipe.xadd(stream_key, {
                             "session_id": session_id,
                             "agent_id":   agent_id,
                             "pk_id":      str(pk_id),
                             "type":       data["type"],
                             "sdp":        data["sdp"],
-                        })
+                            })
+                            pipe.expire(stream_key, 600)  # adjust TTL as needed
+                            await pipe.execute()
 
                     elif msg_type == "candidate":
                         logger.info(f"[{session_id}] Reading ICE candidate from client sending to worker")
                         cand_data = data.get("candidate")
-                        
-                        await redis_client.xadd(ice_stream_key_client, {
-                            "payload": json.dumps(cand_data)
-                        })
+                        async with redis_client.pipeline(transaction=True) as pipe:
+                            pipe.xadd(ice_stream_key_client, {
+                                "payload": json.dumps(cand_data)
+                            })
+                            pipe.expire(ice_stream_key_client, 600)  # adjust TTL as needed
+                            await pipe.execute()
 
                         # Check if browser is signaling End-of-Candidates
                         if cand_data is None or cand_data.get("candidate") == "":
@@ -357,15 +362,16 @@ class HandshakeController:
 
         answer_stream_key = f"webrtc:answer:{session_id}"
  
-
-        # --- Publish offer to worker stream ---
-        await redis_client.xadd(stream_key, {
-            "session_id": session_id,
-            "agent_id": agent_id,
-            "pk_id": pk_id,
-            "type": offer_type,
-            "sdp": offer_sdp,
-        })
+        async with redis_client.pipeline(transaction=True) as pipe:
+            pipe.xadd(stream_key, {
+                "session_id": session_id,
+                "agent_id": agent_id,
+                "pk_id": pk_id,
+                "type": offer_type,
+                "sdp": offer_sdp,
+            })
+            pipe.expire(stream_key, 600)  # adjust TTL as needed
+            await pipe.execute()
  
         # --- Wait for worker answer, then cleanup ---
         try:
