@@ -9,7 +9,8 @@ class EndConversationTool(Tool):
     inputs = {
         "confirm": {
             "type": "boolean",
-            "description": "Set to True to confirm closing the chat session."
+            "description": "Set to True to confirm closing the chat session.",
+            "nullable": True # <--- Add this line to satisfy the validator
         }
         }  # required even if empty
     output_type = "any"
