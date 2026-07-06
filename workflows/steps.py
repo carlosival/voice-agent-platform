@@ -11,6 +11,7 @@ import logging
 import wave, uuid, os 
 import numpy as np
 import json
+import re
 from enum import Enum
 import httpx
 from workflows.utils.memory import InMemoryMemory
