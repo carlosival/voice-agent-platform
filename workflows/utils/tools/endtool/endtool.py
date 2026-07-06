@@ -2,6 +2,9 @@
 from typing import Any, Union
 from smolagents import Tool
 from workflows.signals import EndOfStream
+import logging
+logger = logging.getLogger(__name__)
+
 
 class EndConversationTool(Tool):
     name = "end_conversation"
