@@ -51,6 +51,9 @@ class ICEController:
                 f"IP mismatch for session {session_id}: token={token_ip}, requester={current_ip}"
             )
 
-        return await fetch_cloudflare_ice_servers()
+        response_json = await fetch_cloudflare_ice_servers()
+        # ADD iceTransportPolicy: "relay"
+        response_json["iceTransportPolicy"] = "relay"
+        return response_json
 
         
