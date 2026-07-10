@@ -52,8 +52,6 @@ class ICEController:
             )
 
         response_json = await fetch_cloudflare_ice_servers()
-        # ADD iceTransportPolicy: "relay"
-        response_json["iceTransportPolicy"] = "relay"
         return response_json
 
         

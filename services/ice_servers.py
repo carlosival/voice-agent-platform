@@ -14,7 +14,7 @@ if not CLOUDFLARE_ACCOUNT_ID or not CLOUDFLARE_API_TOKEN:
     # but the endpoint will fail gracefully.
     logger.warning("Missing Cloudflare Environment Variables! ICE server generation will fail.")
 
-@alru_cache(ttl=600)
+
 async def fetch_cloudflare_ice_servers():
     cloudflare_url = f"https://rtc.live.cloudflare.com/v1/turn/keys/{CLOUDFLARE_ACCOUNT_ID}/credentials/generate-ice-servers"
     
