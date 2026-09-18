@@ -18,12 +18,12 @@ SAMPLE_RATE  = 48000
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
 
-def pcm_to_wav(pcm_bytes: bytes, sample_rate: int = SAMPLE_RATE) -> bytes:
+def pcm_to_wav(pcm_bytes: bytes, sample_rate: int = SAMPLE_RATE, channels: int = 1, sample_width = 2) -> bytes:
     """Wrap raw PCM int16 bytes in a WAV container — Whisper needs a file format."""
     buf = io.BytesIO()
     with wave.open(buf, "wb") as wf:
-        wf.setnchannels(1)           # mono
-        wf.setsampwidth(2)           # int16 = 2 bytes
+        wf.setnchannels(channels)           # mono
+        wf.setsampwidth(sample_width)           # int16 = 2 bytes
         wf.setframerate(sample_rate)
         wf.writeframes(pcm_bytes)
     return buf.getvalue()
@@ -40,8 +40,11 @@ def frames_to_pcm(frames: list[np.ndarray]) -> bytes:
 async def call_stt_openai(audio: bytes, model: str = STT_MODEL, language: str = STT_LANGUAGE, api_key: str = STT_API_KEY, base_url: str = STT_BASE_URL, http_client: AsyncClient = None, is_wav: bool = False) -> str:
     """
     Transcribe audio bytes via Groq's OpenAI-compatible API.
+    `audio` must be:
+        PCM S16LE 16 kHz mono (bytes), unless `is_wav=True`.
     """
-    wav_bytes = audio if is_wav else pcm_to_wav(audio)
+    
+    wav_bytes = audio if is_wav else pcm_to_wav(audio, sample_rate=16000)
 
     # 1. Groq, OpenAI, Speaches, etc. requires an Authorization header with your API key
     headers = {

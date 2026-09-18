@@ -1,5 +1,56 @@
 from workflows.steps.llm.types import LLMEvent
+from typing import Optional, AsyncGenerator
+from openai import AsyncOpenAI
+import httpx, json, logging, asyncio
 
+
+logger = logging.getLogger(__name__)
+
+
+# Keys accepted by client.chat.completions.create(), beyond model/messages/tools/stream
+# which are already handled explicitly above.
+VALID_CHAT_COMPLETION_KEYS = {
+    "temperature",
+    "top_p",
+    "n",
+    "seed",
+    "max_tokens",              # legacy, some models still want this
+    "max_completion_tokens",   # newer models (o-series, gpt-5 family)
+    "stop",
+    "presence_penalty",
+    "frequency_penalty",
+    "logit_bias",
+    "tool_choice",
+    "parallel_tool_calls",
+    "response_format",
+    "reasoning_effort",
+    "stream_options",
+    "logprobs",
+    "top_logprobs",
+    "user",
+    "metadata",
+    "modalities",
+    "audio",
+    "store",
+}
+
+
+def extract_valid_llm_config(llm_config: Optional[dict]) -> dict:
+    """
+    Filters llm_config down to keys accepted by chat.completions.create(),
+    dropping anything unrecognized (and logging what got dropped) instead of
+    blindly merging and letting the OpenAI SDK raise a confusing TypeError.
+    """
+    if not llm_config:
+        return {}
+
+    valid = {k: v for k, v in llm_config.items() if k in VALID_CHAT_COMPLETION_KEYS}
+    dropped = set(llm_config.keys()) - VALID_CHAT_COMPLETION_KEYS
+
+    if dropped:
+        logger.warning(f"[LLM Engine] Ignoring unsupported llm_config keys: {sorted(dropped)}")
+
+    return valid
 
 '''
     This layer send all info the llm needs, prompt,tools, messages, etc 
@@ -17,13 +68,13 @@ from workflows.steps.llm.types import LLMEvent
 async def call_llm_stream_openai(
     messages: Optional[list] = None,
     tools: Optional[list] = None,
-    http_client: Optional[AsyncClient] = None,
+    http_client: Optional[httpx.AsyncClient] = None,
     tracing_data: Optional[dict] = None,
     model: Optional[str] = None,
     prompt: Optional[str] = None,
     provider_url: str = None,
     api_key: str = None,
-    llm_config: Optional[dict] = {},
+    llm_config: Optional[dict] = None,
 ) -> AsyncGenerator[LLMEvent, None]:
     """
     Async streaming using AsyncOpenAI client style.
@@ -32,12 +83,15 @@ async def call_llm_stream_openai(
     Also Yields custom events: coding_block, ttft (time to first token), token_usage, etc.
     Handle more as needed.
     """
+    own_http_client = False
     if http_client is None:
-        http_client = AsyncClient(timeout=30.0)
+        http_client = httpx.AsyncClient(timeout=30.0)
+        own_http_client = True
     
     if prompt and (messages or tools):
-        logger.warning("[LLM Engine] Prompt and messages or tools provided.")
+        logger.warning("[LLM Engine] Prompt and messages both cannot be set")
         # TODO: Handle this case do something more stream like raise a exception or yield a error event
+        raise Exception("[LLM Engine] Prompt and messages or tools both cannot be set togheter")
 
     client = AsyncOpenAI(
         api_key=api_key,
@@ -50,7 +104,7 @@ async def call_llm_stream_openai(
     }
 
     if prompt:
-        kwargs["prompt"] = prompt
+        kwargs["message"] = [{"role": "user", "content": prompt}]
     
     if messages:
         kwargs["messages"] = messages    
@@ -59,8 +113,9 @@ async def call_llm_stream_openai(
         kwargs["tools"] = tools
         kwargs["tool_choice"] = "auto"
 
+    # Extract the config from database to LLM Expected
     if llm_config:
-        kwargs.update(llm_config)
+        kwargs.update(extract_valid_llm_config(llm_config))
 
     # --- MINIMAL TRACING HOOKS ---
     tracer = tracing_data.get("tracer") if tracing_data else None
@@ -96,13 +151,13 @@ async def call_llm_stream_openai(
     try:
         async with await client.chat.completions.create(**kwargs) as stream:
             async for chunk in stream:
-                logger.info(f"[raw_chunk] got chunk: {chunk}")  
+                logger.debug(f"[raw_chunk] got chunk: {chunk}")  
                 choice = chunk.choices[0]
                 delta = choice.delta
                 finish_reason = choice.finish_reason
 
                 # ADD THIS:
-                logger.info(f"[raw_chunk] finish={finish_reason} content={repr(getattr(delta, 'content', None))} tool_calls={getattr(delta, 'tool_calls', None)}")
+                logger.debug(f"[raw_chunk] finish={finish_reason} content={repr(getattr(delta, 'content', None))} tool_calls={getattr(delta, 'tool_calls', None)}")
 
                 # Extract content and tool, calls, could be reasoning, etc from the delta
                 token = getattr(delta, "content", None)
@@ -148,17 +203,20 @@ async def call_llm_stream_openai(
                             }
 
                 if finish_reason:
+                    # Convert our tracking dict back into a clean list for the tracer
+                    final_tools = [tool for idx, tool in sorted(accumulated_tools.items())]
+
+                    # Stream ended cleanly -> update output data
+                    if span:
+                        span.update(output={"text": accumulated_text, "tool_calls": final_tools, "finish_reason": finish_reason})
                     yield {"event": "finish", "data": finish_reason}
         
-        # Convert our tracking dict back into a clean list for the tracer
-        final_tools = [tool for idx, tool in sorted(accumulated_tools.items())]
-
-        # Stream ended cleanly -> update output data
-        if span:
-            span.update(output={"text": accumulated_text, "tool_calls": final_tools, "finish_reason": final_reason})
+        
     except asyncio.CancelledError:
         # User barged in and interrupted the stream
         logger.info("[LLM Engine] Stream cut short by user barge-in.")
+        # Convert our tracking dict back into a clean list for the tracer
+        final_tools = [tool for idx, tool in sorted(accumulated_tools.items())]
         if span:
             span.update(
                 level="WARNING",
@@ -168,8 +226,11 @@ async def call_llm_stream_openai(
         raise  # Must re-raise CancelledError for proper pipeline task cleanup
     except Exception as e:
         logger.error(f"Error calling LLM: {e}")
+        yield {"event": "error", "data": str(e)}
         if span:
             span.update(level="ERROR", status_message=str(e))
     finally:
+        if own_http_client:
+            await http_client.aclose()
         if span:
             span.end()

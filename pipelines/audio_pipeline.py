@@ -91,7 +91,7 @@ async def audio_pipeline(input_track, ctx):
             # Stop MediaStreamTrack incoming frames
             input_track.stop()    
             # Detach the output track queue from the program, let the clean up to GC
-            output_track.purge() 
+            output_track.clear() 
             
             # Stop outgoing frames to frontend 
             output_track.stop()

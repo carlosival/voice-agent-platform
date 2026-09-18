@@ -5,6 +5,7 @@ from scipy import signal
 from av import AudioFrame
 import logging
 
+
 logger = logging.getLogger(__name__)
 
 SAMPLE_RATE = 48000

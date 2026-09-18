@@ -11,9 +11,8 @@ def get_prompt(uri:str) -> str:
             path = BASE_DIR / uri
             with open(path, "r", encoding="utf-8") as file:
                 content= file.read()
-                print(f"Content: {content}")
                 return content
         except FileNotFoundError:
-                print("The file was not found.")
+                print("The file was not found.") # Change for loggers refactor
         except OSError as e:
-                print(f"Error reading file: {e}")
+                print(f"Error reading file: {e}") # Change for loggers refactor

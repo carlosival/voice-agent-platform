@@ -3,13 +3,15 @@ import asyncio
 import uuid
 import httpx
 from pathlib import Path
-from typing import AsyncGenerator
+from typing import AsyncGenerator, Optional, Any
 import wave
 import io
 import scipy.signal as signal
 import numpy as np
 import logging
-from .helpers import save_debug_wav
+from workflows.utils.helpers import save_debug_wav
+from dataclasses import dataclass
+
 
 
 TTS_API_KEY = os.getenv("TTS_API_KEY", "dummy_key")
@@ -84,7 +86,7 @@ def _validate_wav_fmt(fmt: WavFmt, sample_rate: int, strict: bool = False) -> No
 
 # ─── TTS Call ─────────────────────────────────────────────────────────────────
 
-async def call_tts( text: str, provider: str, tts_model: str, tts_voice: str, tts_base_url: str, tts_api_key: str, response_format: str, sample_rate: int, http_client: httpx.AsyncClient,) -> AudioChunk:
+async def call_tts( text: str, provider: str, tts_model: str, tts_voice: str, tts_base_url: str, tts_api_key: str, response_format: str, sample_rate: int, http_client: httpx.AsyncClient,) -> Any:
     """
     Call Speaches TTS endpoint (OpenAI-compatible /v1/audio/speech).
     Returns raw WAV bytes — caller decides what to do with them.
@@ -124,6 +126,7 @@ async def call_tts_stream(
     base_url: str = TTS_BASE_URL,
     api_key: str = TTS_API_KEY,
     http_client: httpx.AsyncClient = None,
+    debug: bool = False
 ) -> AsyncGenerator[bytes, None]:
     
     """
@@ -154,7 +157,7 @@ async def call_tts_stream(
         timeout=httpx.Timeout(timeout=None, connect=5.0)
     ) as resp:
         resp.raise_for_status()
-
+        decided_wav = None
         async for chunk in resp.aiter_bytes():
             if not chunk:
                 break

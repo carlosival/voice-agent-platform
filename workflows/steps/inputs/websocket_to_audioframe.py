@@ -4,7 +4,7 @@
 import asyncio
 import base64
 import json
-import logging
+
 from asyncio import TimeoutError, CancelledError, wait_for
 from typing import AsyncGenerator, Optional
 
@@ -14,6 +14,9 @@ from av import AudioFrame
 from av.audio.resampler import AudioResampler
 from websockets.exceptions import ConnectionClosed
 
+import logging 
+
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 TARGET_SAMPLE_RATE = 48000

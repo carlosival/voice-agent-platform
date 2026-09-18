@@ -79,7 +79,7 @@ class AudioOutputTrack(MediaStreamTrack):
         
         
 
-    async def push_pcm(self, pcm: np.ndarray):
+    async def write(self, pcm: np.ndarray):
         """Push a numpy int16 array — chunks it into 10ms frames."""
         pcm = pcm.astype(np.int16)
         for i in range(0, len(pcm), SAMPLES_PER_10MS):
@@ -113,15 +113,15 @@ class AudioOutputTrack(MediaStreamTrack):
                     f.to_ndarray().flatten() for f in resampled_frames
                 ]).astype(np.int16)
 
-            await self.push_pcm(pcm)
+            await self.write(pcm)
 
 
     async def push_bytes(self, raw_bytes: bytes):
         """Push raw PCM bytes — converts to int16 array and chunks."""
-        await self.push_pcm(np.frombuffer(raw_bytes, dtype=np.int16)) 
+        await self.write(np.frombuffer(raw_bytes, dtype=np.int16)) 
 
     
-    def purge(self):
+    def clear(self):
         """
         Optimized clear: Replaces the queue with a fresh one to drop 
         all buffered frames instantly.
@@ -131,7 +131,7 @@ class AudioOutputTrack(MediaStreamTrack):
         logger.info(f"AudioOutputTrack: Cleared {items_dropped} frames from buffer.")
 
     
-    def clear(self):
+    def clear_subotimal(self):
         """Safely empties the queue without replacing the object."""
         while not self._queue.empty():
             try:

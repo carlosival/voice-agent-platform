@@ -1,7 +1,7 @@
 url_provider = {
-    "openai": "https://api.openai.com/v1",
     "ollama": "http://localhost:11434/v1",
-    "groq": "https://api.groq.com/v1",
+    "openai": "https://api.openai.com/v1",
+    "groq": "https://api.groq.com/openai/v1",
     "anthropic": "https://api.anthropic.com/v1",
     "google": "https://generativelanguage.googleapis.com/v1beta",
     "xai": "https://api.xai.com/v1",
@@ -14,7 +14,8 @@ provider_models_supported = {
         
     },
     "groq": {
-        "llama3.1:8b": 1,
+        "openai/gpt-oss-120b": 1,
+        "llama-3.3-70b-versatile":1,
     },
     "anthropic": 2,
     "google": 3,

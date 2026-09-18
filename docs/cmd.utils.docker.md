@@ -40,3 +40,7 @@ docker exec -it <container_name> printenv
 # Monitor Redis
 docker exec -it redis sh  
 /usr/local/bin/redis-cli MONITOR | grep webrtc
+
+
+# Copy from container to hosto
+docker cp worker-1:/app/workflows/steps/stt/workers/stt_debug/f4429c22f75048beb7fdc0efed064c95_221frames.wav ./

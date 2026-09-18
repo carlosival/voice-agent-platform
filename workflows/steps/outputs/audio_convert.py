@@ -38,6 +38,13 @@ class AudioConverter:
         input_format: AudioFormat,
         output_format: AudioFormat,
     ):
+
+        if input_format is None or output_format is None:
+            raise ValueError(
+            f"AudioConverter requires non-None formats, got "
+            f"input_format={input_format!r}, output_format={output_format!r}"
+            )
+
         self.input_format = input_format
         self.output_format = output_format
 
@@ -90,6 +97,7 @@ class AudioConverter:
             Encoding.PCM_F32LE: "flt",
             Encoding.PCM_S32LE: "s32",
             Encoding.PCM_U8: "u8",
+            Encoding.PCM_S24LE: "s32",
         }
 
         return mapping[encoding]

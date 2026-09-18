@@ -22,7 +22,7 @@ async def brain_bridge(source: AsyncGenerator, ctx: ExecContext) -> AsyncGenerat
     # Track if we are already shutting down to avoid double-closing
     is_closing = RefBool(False)
 
-    harvester_task = create_task(vad_backpressure(source, queue, is_closing))
+    harvester_task = asyncio.create_task(vad_backpressure(source, queue, is_closing))
 
     try:
         while True:

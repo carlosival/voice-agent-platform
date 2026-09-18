@@ -5,7 +5,7 @@ from workflows.utils.tools import EndConversationTool
 from workflows.utils.memory import InMemoryMemory
 from workflows.utils.observavility import get_tracer
 from httpx import AsyncClient
-from workflows import AudioOutputTrack
+from workflows.steps.outputs import AudioOutputTrack
 from httpx import AsyncClient
 from aiortc import RTCPeerConnection, RTCIceCandidate
 from aiortc.sdp import candidate_to_sdp
@@ -17,6 +17,7 @@ from typing import Any
 import time
 import asyncio
 from workflows.utils.context import get_prompt
+from services.vault.secrets import Secrets
 
 
 logger = logging.getLogger(__name__)
@@ -25,8 +26,10 @@ logger = logging.getLogger(__name__)
 end_conversation_tool = EndConversationTool()
 http_client = AsyncClient(timeout=60.0)
 tracer = get_tracer(http_client)
-
+vault = Secrets(lambda key, path: None)
 tools = [end_conversation_tool]
+
+
 
 class DepProvider:
     @staticmethod
@@ -45,7 +48,6 @@ class DepProvider:
 
         logger.info(f"Agent config: {agent_config}")
 
-
         # 1. Load Trace Context
         session_trace_id = tracer.create_trace_id(seed=session_id)
 
@@ -63,19 +65,23 @@ class DepProvider:
         ctx = ExecContext(shared_data={
             "tools": tools_registry,
             "system_prompt": system_prompt,
-            "llm_model": agent_config.get("llm_config", {}).get("model", None),
+            "llm_api_key": vault.get_secret(agent_config.get("public_key"), "LLM_API_KEY"),
+            "stt_api_key": vault.get_secret(agent_config.get("public_key"), "STT_API_KEY"),
+            "tts_api_key": vault.get_secret(agent_config.get("public_key"), "TTS_API_KEY"),
             "llm_temperature": agent_config.get("llm_config", {}).get("temperature", None),
             "llm_max_tokens": agent_config.get("llm_config", {}).get("max_tokens", None),
             "llm_top_p": agent_config.get("llm_config", {}).get("top_p", None),
+            "tts_provider":agent_config.get("tts_config",{}).get("engine", None),
+            "stt_provider": agent_config.get("stt_config",{}).get("engine",None),
             "session_id": session_id,
             "trace_context": {"trace_id": session_trace_id, "parent_span_id": ""},
             "peer_state": {
                 "connected_at": time.time(),
                 "last_activity": time.time(),
             },
-            "metadata": {
-                "token_usage": 0,
-            },
+            "stt_config": agent_config.get("stt_config",{}),
+            "tts_config": agent_config.get("tts_config",{}),
+            "llm_config": agent_config.get("llm_config",{}),
             "message_history": InMemoryMemory(),
             "resources": {
                 "output_track": AudioOutputTrack(),
@@ -86,6 +92,9 @@ class DepProvider:
         })
 
         
+        #ALl thing related to webrtc connection should go to webrtc connection approvisioning
+        # With a WebrtcpeerDepency object.
+
         def on_connected_fully() -> None:
             pass
 

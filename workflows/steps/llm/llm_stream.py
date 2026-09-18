@@ -1,9 +1,14 @@
 from typing import Dict, AsyncGenerator
 from .workers import call_llm_stream_openai_worker, get_llm_provider_worker, get_provider_url
+from workflows.signals import SignalFrame, WarmUp, AskUserStillThere, EndOfStream, StartSpeaking
 from yaafpy.types import ExecContext
+import logging 
+import asyncio
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 async def llm_stream(
-    text: str,
+    source: AsyncGenerator,
     ctx:    ExecContext,
 ) -> AsyncGenerator[str, None]:
     """
@@ -16,15 +21,17 @@ async def llm_stream(
     message_history: InMemoryMemory = ctx.shared_data["message_history"]
     tools: Dict[str, Tool] = ctx.shared_data.get("tools", {}) # Dict[str, Tool] smolagent
     system_prompt = ctx.shared_data.get("system_prompt", "")
-    provider_name = ctx.config["llm"]["provider_name"]
-    model = ctx.config["llm"]["model"]
-    provider_url = ctx.config["llm"]["provider_url"]
-    api_key = ctx.config["llm"]["api_key"]
+    provider_name = ctx.shared_data["llm_config"]["engine"]
+    provider_url = get_provider_url(provider_name)
+    model = ctx.shared_data["llm_config"]["model"]
+    llm_config = ctx.shared_data["llm_config"]
+    api_key = ctx.shared_data["llm_api_key"]
     tracer = ctx.shared_data["resources"]["tracer"]
     trace_id = ctx.shared_data["trace_context"]["trace_id"]
     parent_span_id = ctx.shared_data["trace_context"]["parent_span_id"]
     timeout_limit = 5.0
     
+    ''' Deprecated Delete this function it is in worker dir
     async def llm_stream_worker(text, sentence_queue):
         token_count = 0
         buffer = ""
@@ -148,7 +155,7 @@ async def llm_stream(
             sentence_queue.put_nowait(e)
         finally:
             sentence_queue.put_nowait(None) # EOF
-    
+    '''
     try:
         async for item in source:
 
@@ -167,7 +174,7 @@ async def llm_stream(
                 logger.info(" [INTERRUPT] llm_stream received StartSpeaking. Cancelling current LLM task.")
                 if current_task:
                     current_task.cancel()
-                    await gather(current_task, return_exceptions=True)
+                    await asyncio.gather(current_task, return_exceptions=True)
                     current_task = None
                     sentence_queue = None  # ← orphan it, GC handles cleanup, no drain needed
                 yield item
@@ -176,13 +183,13 @@ async def llm_stream(
             if isinstance(item, str):
                 logger.info(f"[llm_stream] Received string Question: {repr(item)}")
                 timeout_curr = 2.0
-                sentence_queue = Queue()  # ← fresh queue per request, not shared state
+                sentence_queue = asyncio.Queue()  # ← fresh queue per request, not shared state
                 full_response = ""
                 tool_calls = []
                 
                 # The extra function to call for a llm provider bring flexibility at runtime
                 # It allows to add new providers it one is down 
-                current_task = create_task(get_llm_provider_worker(provider_name, model)(
+                current_task = asyncio.create_task(get_llm_provider_worker(provider_name, model)(
                                             text=item,
                                             memory=message_history, 
                                             tools=tools, 
@@ -201,7 +208,7 @@ async def llm_stream(
                     try:
                         # 1. WAIT WITH TIMEOUT
                         # If LLM doesn't yield a sentence in 5s, send a placeholder
-                        item_from_queue = await wait_for(
+                        item_from_queue = await asyncio.wait_for(
                             sentence_queue.get(), 
                             timeout=timeout_curr
                         )
@@ -215,14 +222,14 @@ async def llm_stream(
                             # Call LLM again with tool results included
                             if current_task and not current_task.done():
                                 current_task.cancel()
-                                await gather(current_task, return_exceptions=True)
+                                await asyncio.gather(current_task, return_exceptions=True)
                                 
                                 # I think is not need to clean the queue here, should be clean
                                 logger.info(f"[llm_stream_sentence_queue] is empty: {sentence_queue.empty()}")
                             
                             # The extra function to call for a llm provider bring flexibility at runtime
                             # It allows to add new providers it one is down or not available  
-                            current_task = create_task(get_llm_provider_worker(provider_name, model)(
+                            current_task = asyncio.create_task(get_llm_provider_worker(provider_name, model)(
                                             text=item,
                                             memory=message_history, 
                                             tools=tools, 
@@ -241,7 +248,7 @@ async def llm_stream(
                         # 2. HANDLE RESULTS
                         if item_from_queue is None: # Normal finish
                             await message_history.add_user_message(item)
-                            await message_history.add_ai_message(full_response, None)
+                            await message_history.add_ai_message(full_response, None) 
                             break
                         
                         if isinstance(item_from_queue, EndOfStream):
@@ -260,7 +267,7 @@ async def llm_stream(
                             yield "Lo siento, tuve un problema técnico al procesar su pregunta."
                             break
                         
-                        if isinstance(item_from_queue, CancelledError):
+                        if isinstance(item_from_queue, asyncio.CancelledError):
                             logger.info("LLM: Loop cancelled during barge-in.")
                             # Remove Last user question without reply to prevent history pollution
                             if message_history.in_memory and message_history.in_memory[-1]['role'] == 'user':
@@ -271,7 +278,7 @@ async def llm_stream(
                         full_response += item_from_queue
                         yield item_from_queue # It's a real sentence
 
-                    except TimeoutError:
+                    except asyncio.TimeoutError:
                         
                         if timeout_curr < timeout_limit:
                             logger.warning("LLM: Producer slow Thinking...")
@@ -286,7 +293,7 @@ async def llm_stream(
                             yield "Lo siento, tuve un problema técnico al procesar su pregunta."
                             break
 
-                    except CancelledError:
+                    except asyncio.CancelledError:
                         logger.info("LLM: Loop cancelled during barge-in.")
                         raise
                     
@@ -294,11 +301,11 @@ async def llm_stream(
                         logger.error(f"LLM: Unexpected error in consumer: {e}")
                         yield "Hubo un error inesperado."
                         break
-    except CancelledError:
+    except asyncio.CancelledError:
         logger.info("LLM: Producer cancelled.")
         raise  # let it propagate cleanly
     except Exception as e:
-        logger.error(f"LLM: Unexpected error in producer: {type(e).__name__}: {e!r}")
+        logger.error(f"LLM: Unexpected error in producer: {type(e).__name__}: {e!r}", exc_info=1)
         # or even better, get the traceback:
         logger.exception("LLM: Unexpected error in producer")
         yield "Hubo un error inesperado."
@@ -306,6 +313,6 @@ async def llm_stream(
         # Cleanup task if it was orphaned by an error or cancellation
         if current_task and not current_task.done():
             current_task.cancel()
-            await gather(current_task, return_exceptions=True)
+            await asyncio.gather(current_task, return_exceptions=True)
         #if sentence_queue:
         #    sentence_queue.put_nowait(None) # EOF

@@ -3,8 +3,11 @@ from typing import AsyncGenerator
 import asyncio
 import av
 from .config import WAIT_FOR_TIMEOUT
+import numpy as np
+import logging 
 
-
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 
 # ──────────────────────────────────────────────
@@ -21,21 +24,23 @@ async def track_frames(track: MediaStreamTrack) -> AsyncGenerator[av.AudioFrame,
     try:
         while True:
             try:
-                frame = await wait_for(track.recv(), timeout=WAIT_FOR_TIMEOUT)
+                frame = await asyncio.wait_for(track.recv(), timeout=WAIT_FOR_TIMEOUT)
                 frame_count += 1
 
-                if frame_count <= 3:  # inspect first 3 frames only
+                if frame_count % 100 == 0:  # inspect mod 100 frames only
                     arr = frame.to_ndarray()
                     logger.info(
                         f"Frame #{frame_count} | "
                         f"format={frame.format.name} | "
                         f"layout={frame.layout.name} | "
-                    f"sample_rate={frame.sample_rate} | "
-                    f"samples={frame.samples} | "
-                    f"shape={arr.shape} | "
-                    f"dtype={arr.dtype} | "
-                    f"min={arr.min()} max={arr.max()} "
-                    f"rms={np.sqrt(np.mean(arr.astype(np.float32)**2)):.1f}"
+                        f"channels (metadata): {frame.layout.nb_channels} | "
+                        f"is_planar={frame.format.is_planar} | "
+                        f"sample_rate={frame.sample_rate} | "
+                        f"samples={frame.samples} | "
+                        f"shape={arr.shape} | "
+                        f"dtype={arr.dtype} | "
+                        f"min={arr.min()} max={arr.max()} "
+                        f"rms={np.sqrt(np.mean(arr.astype(np.float32)**2)):.1f}"
                 )
 
                 if frame_count % 100 == 0:

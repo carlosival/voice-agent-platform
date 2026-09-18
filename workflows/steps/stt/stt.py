@@ -1,10 +1,15 @@
 from .config import DEBUG, SAVE_TO_S3
 from workflows.steps.stt.workers import debug_stt, save_utterance_s3
-from workflows.steps.stt.workers.stt_factory_provider import get_stt_provider
+from workflows.steps.stt.workers import get_stt_provider, get_stt_provider_url
 from yaafpy.types import ExecContext
 from typing import AsyncGenerator
 from workflows.signals import EndOfStream, AskUserStillThere, StartSpeaking, WarmUp 
 import asyncio
+
+import logging 
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 def cancel_all_tasks(tasks: list[asyncio.Task]):
     for task in tasks:
@@ -30,11 +35,15 @@ async def stt_stream(
     tasks = []
     
     http_client: httpx.AsyncClient = ctx.shared_data["resources"]["http_client"]
-    stt_provider_name = ctx.config["stt"]["provider_name"]
-    stt_model         = ctx.config["stt"]["model"]
-    stt_language      = ctx.config["stt"]["language"]
-    stt_api_key       = ctx.config["stt"]["api_key"]
-    stt_base_url      = ctx.config["stt"]["base_url"]
+    stt_provider_name = ctx.shared_data["stt_config"]["engine"]
+    logger.info(f"stt_provider_name:{stt_provider_name}")
+    stt_model         = ctx.shared_data["stt_config"]["model"]
+    stt_language      = ctx.shared_data["stt_config"]["language"]
+    stt_api_key       = ctx.shared_data["stt_api_key"]
+    stt_base_url = get_stt_provider_url(stt_provider_name)
+    logger.info(f"stt_base_url:{stt_base_url}")
+
+    current_task = None
 
     async for item in source:
 

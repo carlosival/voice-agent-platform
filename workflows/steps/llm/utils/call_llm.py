@@ -76,7 +76,7 @@ async def call_llm_stream_openai(
     accumulated_text = "" # Only for debug pourposes yield individual token
     # Track accumulated tool calls by their delta index
     accumulated_tools = {}
-    final_reason = "unknown"
+    finish_reason = None
 
     try:
         async with await client.chat.completions.create(**kwargs) as stream:
@@ -139,10 +139,11 @@ async def call_llm_stream_openai(
 
         # Stream ended cleanly -> update output data
         if span:
-            span.update(output={"text": accumulated_text, "tool_calls": final_tools, "finish_reason": final_reason})
+            span.update(output={"text": accumulated_text, "tool_calls": final_tools, "finish_reason": finish_reason})
     except asyncio.CancelledError:
         # User barged in and interrupted the stream
         logger.info("[LLM Engine] Stream cut short by user barge-in.")
+        final_tools = [tool for idx, tool in sorted(accumulated_tools.items())]
         if span:
             span.update(
                 level="WARNING",

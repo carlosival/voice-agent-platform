@@ -443,7 +443,7 @@ async def llm_stream(
         token_count = 0
         buffer = ""
         # Build messages from history
-        messages = build_chat_messages(await message_history.get_messages(), system_prompt)
+        messages = await build_chat_messages(await message_history.get_messages(), system_prompt)
         # Build schema safely
         if tools:
             tools_schema = [get_tool_json_schema(t) for t in tools.values()]

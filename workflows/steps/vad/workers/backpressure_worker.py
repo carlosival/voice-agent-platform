@@ -4,6 +4,11 @@ from typing import AsyncGenerator
 import asyncio
 from workflows.signals import WarmUp, AskUserStillThere, StartSpeaking, EndOfStream
 
+import logging 
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
 '''
 Consume utterance from VAD and keep in a queue (backpressure)
 '''
@@ -39,7 +44,7 @@ async def vad_backpressure(source: AsyncGenerator, queue: asyncio.Queue, is_clos
         except (asyncio.CancelledError, GeneratorExit, MediaStreamError):
             is_closing.value = True
         except Exception as e:
-            logger.error(f"Bridge Harvester Error: {e}")
+            logger.error("Bridge Harvester Error", exc_info=True)
         finally:
             try:
                 queue.put_nowait(None)
