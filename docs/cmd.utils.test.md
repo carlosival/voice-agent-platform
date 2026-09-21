@@ -75,3 +75,7 @@ curl https://api.groq.com/openai/v1/chat/completions \
         "parameters": {"type": "object", "properties": {}, "required": []}
   }'"tool_choice": "auto"
 {"id":"chatcmpl-b740e70c-4a78-42b0-a2f6-9d6435d4f449","object":"chat.completion","created":1778762393,"model":"llama-3.3-70b-versatile","choices":[{"index":0,"message":{"role":"assistant","tool_calls":[{"id":"fcc4jmv4d","type":"function","function":{"name":"end_conversation","arguments":"null"}}]},"logprobs":null,"finish_reason":"tool_calls"}],"usage":{"queue_time":0.153111877,"prompt_tokens":232,"prompt_time":0.01400981,"completion_tokens":9,"completion_time":0.025112427,"total_tokens":241,"total_time":0.039122237},"usage_breakdown":null,"system_fingerprint":"fp_d42c28f9ce","x_groq":{"id":"req_01krk80a57e6w9dv4z1qk0szms","seed":683720658},"service_tier":"on_demand"}
+
+
+# Download Smart Turn from HF
+curl -L -O -# https://huggingface.co/pipecat-ai/smart-turn-v3/resolve/main/smart-turn-v3.2-cpu.onnx

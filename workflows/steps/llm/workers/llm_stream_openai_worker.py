@@ -68,7 +68,6 @@ async def call_llm_stream_openai_worker(
     queue: asyncio.Queue = None
     ):
         sentence_queue = queue
-        token_count = 0
         buffer = ""
 
 
@@ -130,8 +129,7 @@ async def call_llm_stream_openai_worker(
                     # Post Processing Hooks per valuable chunks of data.
                     # You can work with allucination mesuare here, per valuable chunks of data.
                     buffer   += data
-                    logger.info(f"[llm_stream] token #{token_count}: {repr(data)}")
-
+                    
                     if buffer.rstrip() and buffer.rstrip()[-1] in SENTENCE_ENDS:
                             logger.info(f"[llm_stream] Flushing sentence: '{buffer.strip()}'")
                             raw_sentence = buffer.strip()

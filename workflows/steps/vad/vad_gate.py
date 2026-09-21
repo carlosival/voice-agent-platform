@@ -3,6 +3,7 @@ from .config import (
     INACTIVITY_STOP, MAX_ASK_USER, INACTIVITY_FRAMES,
     START_FRAMES, STOP_FRAMES, 
 )
+from workflows.steps.turn.utils import predict_endpoint
 from workflows.signals import SignalFrame, WarmUp, AskUserStillThere, EndOfStream, StartSpeaking, EndSpeaking
 from .utils import silero_has_speech_from_numpy
 from yaafpy.types import ExecContext
@@ -36,6 +37,7 @@ async def vad_gate(source: AsyncGenerator, ctx: ExecContext) -> AsyncGenerator[l
     silero_buf     = []      # accumulates SILERO_ACCUM frames before VAD call
     consecutive_silence_counter = 0
     ask_user = 0
+    end_speech_check = False
     
     # This holds audio history during silent periods
     pre_roll_history = deque(maxlen=PRE_ROLL_LEN)
@@ -118,7 +120,7 @@ async def vad_gate(source: AsyncGenerator, ctx: ExecContext) -> AsyncGenerator[l
                                 state = VADState.SPEAKING
                                 consecutive_silence_counter = 0
                                 ask_user = 0
-                                # SIGNAL 1: Tell everyone to SHUT UP right now
+                                # SIGNAL 1: Signal other process to Stop the workers
                                 yield StartSpeaking()
                         case VADState.SPEAKING:
                             pass
@@ -127,7 +129,7 @@ async def vad_gate(source: AsyncGenerator, ctx: ExecContext) -> AsyncGenerator[l
                             stopping_count = 0
                 else:
                     match state:
-                        case VADState.QUIET:
+                        case VADState.QUIET: # The Inactivity Period Just Extends
                             consecutive_silence_counter += SILERO_ACCUM
                             # Check for hard stop (e.g., 120 seconds)
                             if consecutive_silence_counter >= INACTIVITY_STOP:
@@ -147,6 +149,27 @@ async def vad_gate(source: AsyncGenerator, ctx: ExecContext) -> AsyncGenerator[l
                             stopping_count = SILERO_ACCUM
                         case VADState.STOPPING:
                             stopping_count += SILERO_ACCUM
+                            
+                            try:
+                                if utterance_buf:
+                                    # Use the full utterance buffer for endpoint context
+                                    endpoint_pcm = np.concatenate([f.to_ndarray().reshape(-1) for f in utterance_buf])
+                                    prediction = predict_endpoint(endpoint_pcm)
+                                    probability = prediction.get("probability", 0.0) if isinstance(prediction, dict) else float(prediction)
+
+                                    if probability >= 0.60:
+                                        logger.info(f"TURN: Endpoint detected (prob: {probability:.2f}). Ending turn.")
+                                        state          = VADState.QUIET
+                                        yield EndSpeaking()
+                                        yield utterance_buf
+                                        utterance_buf  = []
+                                        starting_count = 0
+                                        stopping_count = 0
+                                        consecutive_silence_counter = 0
+                                        continue # Skip the hard STOP_FRAMES check if endpointing triggers successfully
+                            except Exception:
+                                logger.exception("TURN: inference failed during stopping state")      
+
                             if stopping_count >= STOP_FRAMES:
                                 logger.info(f"VAD: → {len(utterance_buf)} frames ({len(utterance_buf)*20}ms)")
                                 state          = VADState.QUIET
@@ -158,6 +181,7 @@ async def vad_gate(source: AsyncGenerator, ctx: ExecContext) -> AsyncGenerator[l
                                 starting_count = 0
                                 stopping_count = 0
                                 consecutive_silence_counter = 0
+                               
             except:
                 # Defensive: never let a state-machine bug kill the whole pipeline.
                 # Reset to a known-safe state and keep the stream alive.

@@ -12,6 +12,11 @@ scipy>=1.12.1
 google-cloud-texttospeech
 
 
+# Inference
+numpy
+onnxruntime
+transformers
+
 # ─── DATABASE & ORM ───
 sqlalchemy==2.0.30
 asyncpg==0.29.0
