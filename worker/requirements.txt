@@ -11,17 +11,24 @@ scipy>=1.12.1
 
 google-cloud-texttospeech
 
+# Vault provider
+
+infisicalsdk
 
 # Inference
 numpy
 onnxruntime
 transformers
 
-# ─── DATABASE & ORM ───
+# ─── DATABASE & ORM & Storage ───
 sqlalchemy==2.0.30
 asyncpg==0.29.0
 # Redis for distributed offer/answer exchange and Redis Ledger for Workers state management
 redis==5.0.4
+
+# S3
+boto3>=1.34.0
+botocore>=1.34.0
 
 # Workflow Orchestration
 yaafpy==0.2.3 #To handle  Workflow Orchestration
