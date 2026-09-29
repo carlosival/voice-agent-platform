@@ -1,16 +1,20 @@
 import uuid
 from datetime import datetime
 from typing import List, Optional
-from sqlalchemy import String, ForeignKey, Text, DateTime, Boolean, Index, JSON
-from sqlalchemy.dialects.postgresql import ARRAY
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+
+from sqlalchemy import (
+    String, ForeignKey, Text, DateTime, Boolean, Index, Integer, text, func, UniqueConstraint
+)
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
+
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship 
 
 class Base(DeclarativeBase):
     pass
 
 
-class VoiceAgent(Base):
-    __tablename__ = "voice_agents"
+class Agent(Base):
+    __tablename__ = "agents"
     
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
     name: Mapped[str] = mapped_column(String(100), nullable=False)
@@ -24,9 +28,9 @@ class VoiceAgent(Base):
     )
     
     # Base configurations for the AI stack
-    llm_config: Mapped[dict] = mapped_column(JSON, nullable=False, server_default=text("'{}'::jsonb"))
-    tts_config: Mapped[dict] = mapped_column(JSON, nullable=False, server_default=text("'{}'::jsonb"))
-    stt_config: Mapped[dict] = mapped_column(JSON, nullable=False, server_default=text("'{}'::jsonb"))
+    llm_config: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
+    tts_config: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
+    stt_config: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
     
     # Exact prompt version currently used by the agent.
     prompt_version_id: Mapped[uuid.UUID] = mapped_column(
@@ -35,11 +39,6 @@ class VoiceAgent(Base):
         nullable=False,
     )
     
-   
-    # defines what runtime is allowed/expected to track
-    state: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
-    
-
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
     
     
@@ -64,14 +63,15 @@ class UserAgentAssociation(Base):
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
     
     public_key_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("user_public_keys.id", unique=True, ondelete="CASCADE"), primary_key=True
+        ForeignKey("user_public_keys.id", ondelete="CASCADE")
     )
-    agent_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("voice_agents.id", ondelete="CASCADE"), primary_key=True)
+
+    agent_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("agents.id", ondelete="CASCADE"))
     
     is_enabled: Mapped[bool] = mapped_column(Boolean, default=True) # e.g., Set to false if they stop working
     
     # Optional: If a user wants to override a specific prompt setting on a generic agent
-    custom_config_override: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True) # {"business_name": "Acme Corp"}
+    custom_config_override: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True, server_default=text("'{}'::jsonb")) # {"business_name": "Acme Corp"}
     
     # Single value — clear billing/compliance boundary
     tier: Mapped[str] = mapped_column(String(50), nullable=False, default="free")
@@ -88,7 +88,7 @@ class UserAgentAssociation(Base):
     # Relationships
     public_key: Mapped["UserPublicKey"] = relationship(back_populates="agent_associations")
     
-    agent: Mapped["VoiceAgent"] = relationship(back_populates="user_associations")
+    agent: Mapped["Agent"] = relationship(back_populates="user_associations")
 
 
 class User(Base):
@@ -141,9 +141,9 @@ class Tool(Base):
 
     description: Mapped[str] = mapped_column(Text, nullable=False)
 
-    input_schema: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    input_schema: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
 
-    output_schema: Mapped[dict] = mapped_column(JSONB, nullable=True)
+    output_schema: Mapped[dict] = mapped_column(JSONB, nullable=True, server_default=text("'{}'::jsonb"))
 
 
 
@@ -158,7 +158,7 @@ class AgentToolAssociation(Base):
 
     agent_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
-        ForeignKey("voice_agents.id", ondelete="CASCADE"),
+        ForeignKey("agents.id", ondelete="CASCADE"),
         nullable=False,
     )
 
@@ -238,18 +238,10 @@ class PromptVersion(Base):
         nullable=False,
     )
 
-    input_schema: Mapped[dict] = mapped_column(
-        JSONB,
-        nullable=False,
-        default=dict,
-    )
+    input_schema: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
 
     # Structured Output
-    output_schema: Mapped[dict] = mapped_column(
-        JSONB,
-        nullable=False,
-        default=dict,
-    )
+    output_schema: Mapped[dict] = mapped_column(JSONB,nullable=False,default=dict,)
 
     
     created_at: Mapped[datetime] = mapped_column(
@@ -262,4 +254,125 @@ class PromptVersion(Base):
         "Prompt",
         back_populates="versions",
     )
+
+
+    state: Mapped["State | None"] = relationship(
+    "State",
+    back_populates="prompt_version",
+    uselist=False,
+    cascade="all, delete-orphan",
+    )
+
+
+class State(Base):
+        __tablename__ = "states"
+
+        id: Mapped[uuid.UUID] = mapped_column(
+            UUID(as_uuid=True),
+            primary_key=True,
+            default=uuid.uuid4,
+        )
+
+        prompt_version_id: Mapped[uuid.UUID] = mapped_column(
+            UUID(as_uuid=True),
+            ForeignKey("prompt_versions.id", ondelete="CASCADE"),
+            nullable=False,
+            unique=True,
+        )
+
+        created_at: Mapped[datetime] = mapped_column(
+            DateTime(timezone=True),
+            server_default=func.now(),
+            nullable=False,
+        )
+
+        prompt_version: Mapped["PromptVersion"] = relationship(
+            "PromptVersion",
+            back_populates="state",
+        )
+
+        associated_fields: Mapped[list["StateFieldAssociations"]] = relationship(
+            "StateFieldAssociations",
+            back_populates="state",
+            cascade="all, delete-orphan",
+            
+        )
+
+
+class StateFieldAssociations(Base):
+    __tablename__ = "state_fields_associations"
+
+    __table_args__ = (
+        UniqueConstraint(
+            "state_id",
+            "field_id",
+            name="uq_state_definition_field",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+
+    state_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("states.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+
+    field_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("fields.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+
+    # Configuration of this field within this particular definition
+    required: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+    )
+
+    default_value: Mapped[dict | None] = mapped_column(
+        JSONB,
+        nullable=True,
+    )
+
+    
+    state: Mapped["State"] = relationship(
+        "State",
+        back_populates="associated_fields",
+    )
+
+    field: Mapped["Field"] = relationship("Field",)
+
+
+class Field(Base):
+    __tablename__ = "fields"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+
+    name: Mapped[str] = mapped_column(
+        String(100),
+        nullable=False,
+        unique=True,
+    )
+
+    type: Mapped[str] = mapped_column(
+        String(50),
+        nullable=False,
+    )
+
+    description: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+    )
+
+    
 

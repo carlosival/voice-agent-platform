@@ -15,6 +15,7 @@ docker exec -it fastapi bash
 # Start a project
 docker compose build --no-cache
 docker compose up -d
+docker compose build --no-cache && docker compose up -d
 
 # Stop a project
 docker compose down
@@ -27,6 +28,11 @@ docker inspect <container_name> | grep -i "NetworkSettings" -A 10
 
 # Run profiles
 docker compose --profile tools run --rm seed_db
+
+docker compose --profile tools logs init_db
+
+# Check for problems
+docker compose --profile tools run --rm --no-deps init_db sh -c "pip install -q pyflakes && pyflakes gateway/db/models.py"
 
 # List running containers
 docker ps --format "{{json .}}" --filter "status=running"
