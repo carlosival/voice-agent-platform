@@ -7,8 +7,8 @@ import json
 from typing import Optional, Tuple
 from fastapi import HTTPException, status, Request
 from pydantic import BaseModel, Field
-from gateway.db.repositories.pk_repo import PKRepository
-from gateway.db.repositories.user_repo import UserRepository
+from src.persistence.repositories.pk_repo import PKRepository
+from src.persistence.repositories.user_repo import UserRepository
 from urllib.parse import urlparse
 
 logger = logging.getLogger(__name__)

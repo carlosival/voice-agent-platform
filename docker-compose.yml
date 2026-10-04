@@ -512,7 +512,7 @@ services:
       dockerfile: gateway/Dockerfile
     volumes:
       - ./gateway:/app/gateway 
-    command: python /app/gateway/db/init_db.py
+    command: python /app/src/persistence/init_db.py
     networks:
       - ai-net 
     depends_on:
@@ -539,7 +539,7 @@ services:
     volumes:
       - ./gateway:/app/gateway 
     # Points python directly to your execution entry point
-    command: python /app/gateway/db/seed.py
+    command: python /app/src/persistence/seed.py
     networks:
       - ai-net 
     depends_on:

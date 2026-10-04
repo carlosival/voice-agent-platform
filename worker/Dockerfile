@@ -23,12 +23,12 @@ RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir -r requirements.txt
 
 # Copy the shared folder and the API gateway application
-COPY dbs_clients/ ./dbs_clients/
-COPY services/ ./services/
-COPY peer/ ./peer/
-COPY pipelines/ ./pipelines/ 
-COPY workflows/ ./workflows/ 
-COPY worker/ ./worker/ 
+COPY src/clients/ ./src/clients/
+COPY src/services/ ./src/services/
+COPY src/peer/ ./src/peer/
+COPY src/pipelines/ ./src/pipelines/ 
+COPY workflows/ .workflows/ 
+COPY worker/ .worker/ 
 
 # Updated to match the new workdir path
 ENV PYTHONPATH="/app"

@@ -4,8 +4,8 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker
 
-from gateway.db.models import Base  # Your model Base
-from dbs_clients import async_engine  # Assuming you created it using create_async_engine
+from src.persistence.models import Base  # Your model Base
+from src.clients.postgres_db import async_engine  # Assuming you created it using create_async_engine
 
 async def init_db():
     try:

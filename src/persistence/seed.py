@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker
 
 # Import your declarative models
-from gateway.db.models import (
+from src.persistence.models import (
     Base,
     User,
     UserPublicKey,
@@ -60,7 +60,7 @@ FIELD_FIXTURES = [
 ]
 
 # Prompt fixtures: name -> list of versions.
-# Each version also declares which state fields it tracks: (field_name, required, default_value)
+# Each version also declares which state fields it tracks: (field_name, required)
 PROMPT_FIXTURES = {
     "support_agent": [
         {
@@ -68,8 +68,8 @@ PROMPT_FIXTURES = {
             "input_schema": {"type": "object", "properties": {"business_name": {"type": "string"}}},
             "output_schema": {},
             "state_fields": [
-                ("business_name", True, None),
-                ("issue_summary", False, None),
+                ("business_name", True),
+                ("issue_summary", False),
             ],
         },
         {
@@ -80,9 +80,9 @@ PROMPT_FIXTURES = {
             "input_schema": {"type": "object", "properties": {"business_name": {"type": "string"}}},
             "output_schema": {"type": "object", "properties": {"summary": {"type": "string"}}},
             "state_fields": [
-                ("business_name", True, None),
-                ("issue_summary", False, None),
-                ("ticket_id", False, None),
+                ("business_name", True),
+                ("issue_summary", False),
+                ("ticket_id", False),
             ],
         },
     ],
@@ -92,9 +92,9 @@ PROMPT_FIXTURES = {
             "input_schema": {"type": "object", "properties": {"business_name": {"type": "string"}}},
             "output_schema": {"type": "object", "properties": {"qualified": {"type": "boolean"}}},
             "state_fields": [
-                ("business_name", True, None),
-                ("qualified", False, {"value": False}),
-                ("appointment_time", False, None),
+                ("business_name", True),
+                ("qualified", False),
+                ("appointment_time", False),
             ],
         },
     ],
@@ -104,10 +104,10 @@ PROMPT_FIXTURES = {
             "input_schema": {"type": "object", "properties": {"business_name": {"type": "string"}}},
             "output_schema": {},
             "state_fields": [
-                ("business_name", True, None),
-                ("caller_name", True, None),
-                ("callback_number", True, None),
-                ("appointment_time", False, None),
+                ("business_name", True),
+                ("caller_name", True),
+                ("callback_number", True),
+                ("appointment_time", False),
             ],
         },
     ],
@@ -117,8 +117,8 @@ PROMPT_FIXTURES = {
             "input_schema": {"type": "object", "properties": {"business_name": {"type": "string"}}},
             "output_schema": {},
             "state_fields": [
-                ("business_name", True, None),
-                ("intent", False, None),
+                ("business_name", True),
+                ("intent", False),
             ],
         },
     ],
@@ -230,14 +230,13 @@ async def seed_fixtures():
                     session.add(state)
                     await session.flush()
 
-                    for field_name, required, default_value in v["state_fields"]:
+                    for field_name,required in v["state_fields"]:
                         session.add(
                             StateFieldAssociations(
                                 id=uuid.uuid4(),
                                 state_id=state.id,
                                 field_id=fields[field_name].id,
                                 required=required,
-                                default_value=default_value,
                             )
                         )
 

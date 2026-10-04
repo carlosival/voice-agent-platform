@@ -9,10 +9,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from gateway.routes import get_token, handshake, ice_servers, health
 
 # Import DB
-from dbs_clients import AsyncSessionFactory, async_engine
+from src.clients import AsyncSessionFactory, async_engine
 
 # Import Redis
-from dbs_clients.redis_db import redis_client
+from src.clients.redis_db import redis_client
 
 # Import Router cleanup
 from gateway.worker_router.worker_router import close_geoip_reader

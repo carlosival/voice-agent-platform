@@ -40,10 +40,10 @@ ENV PYTHONPATH="/app"
 ENV PYTHONUNBUFFERED=1
 
 # Copy shared platform infrastructure folders into /app/
-COPY dbs_clients/ ./dbs_clients/
-COPY pipelines/ ./pipelines/
-COPY workflows/ ./workflows/
-COPY services/ ./services/
+COPY src/clients/ ./src/clients/
+COPY src/pipelines/ ./src/pipelines/
+COPY src/services/ ./src/services/
+COPY src/persistence/ ./src/persistence/
 
 # Copy the core gateway service code into /app/gateway
 COPY gateway/ ./gateway/

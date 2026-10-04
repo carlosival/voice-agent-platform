@@ -5,7 +5,7 @@ logger = logging.getLogger(__name__)
 MAX_STREAM_DEPTH = 100
 
 import geoip2.database
-from dbs_clients import redis_client
+from src.clients import redis_client
 from .config import (
     REGIONES_COORDENADAS, 
     TIER_QUEUES, 

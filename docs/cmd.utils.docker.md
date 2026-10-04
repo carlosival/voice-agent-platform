@@ -22,6 +22,7 @@ docker compose down
 
 # See docker containers's inside folder structure
 docker compose run --rm <container_name> find . -maxdepth 3
+docker run --rm -it --entrypoint sh voice-gateway:latest -c "find /app -maxdepth 3 -not -path '*/__pycache__*'"
 
 # Inpect docker container network
 docker inspect <container_name> | grep -i "NetworkSettings" -A 10

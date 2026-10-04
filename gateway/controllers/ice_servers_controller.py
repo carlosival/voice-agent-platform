@@ -6,7 +6,7 @@ from fastapi import APIRouter, HTTPException, status
 from fastapi import APIRouter, Request, Depends, HTTPException, status, WebSocket, WebSocketException
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from gateway.controllers.helper import verify_token_credentials, verify_raw_token, _get_client_ip
-from services import fetch_cloudflare_ice_servers
+from src.services import fetch_cloudflare_ice_servers
 
 logger = logging.getLogger(__name__)
 router = APIRouter()

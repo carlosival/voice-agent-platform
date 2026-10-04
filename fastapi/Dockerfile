@@ -36,8 +36,8 @@ COPY --from=builder /root/.local /root/.local
 ENV PATH=/root/.local/bin:$PATH
 
 # Copy internal shared infrastructure modules
-COPY dbs_clients/ ./dbs_clients/
-COPY pipelines/ ./pipelines/
+COPY src/clients/ .src/clients/
+COPY src/pipelines/ ./src/pipelines/
 COPY workflows/ ./workflows/
 
 # Copy the FastAPI core code directly to /app/fastapi

@@ -9,7 +9,7 @@ from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.controllers import InitController, SessionInitializeRequest, SessionInitializeResponse
-from dbs_clients import get_async_session
+from src.clients.postgres_db import get_async_session
 
 
 router = APIRouter()

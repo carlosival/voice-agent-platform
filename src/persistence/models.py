@@ -19,7 +19,7 @@ class Agent(Base):
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
     name: Mapped[str] = mapped_column(String(100), nullable=False)
     
-    # Internal execution strategy.
+    # Internal runtime execution strategy.
     # This should not necessarily be exposed to end users.
     strategy: Mapped[str] = mapped_column(
         String(50),
@@ -70,7 +70,10 @@ class UserAgentAssociation(Base):
     
     is_enabled: Mapped[bool] = mapped_column(Boolean, default=True) # e.g., Set to false if they stop working
     
-    # Optional: If a user wants to override a specific prompt setting on a generic agent
+    ''' 
+        Optional: If a user wants to override a specific value like { statrategy: new_val, llm_config:{new overrride} prompt_version:{content: newcontent}, etc} 
+        Maybe could be other values like initial_greeting, etc for voice agents
+    '''
     custom_config_override: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True, server_default=text("'{}'::jsonb")) # {"business_name": "Acme Corp"}
     
     # Single value — clear billing/compliance boundary
@@ -240,9 +243,15 @@ class PromptVersion(Base):
 
     input_schema: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
 
-    # Structured Output
+    # Structured Output Type or simple string 
     output_schema: Mapped[dict] = mapped_column(JSONB,nullable=False,default=dict,)
 
+    # Type of prompt (zero shot, CoT, ReAct, etc)
+    strategy: Mapped[str] = mapped_column(
+        String(50),
+        nullable=False,
+        server_default=text("'conversational'"),
+    )
     
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
@@ -333,11 +342,6 @@ class StateFieldAssociations(Base):
         Boolean,
         nullable=False,
         default=False,
-    )
-
-    default_value: Mapped[dict | None] = mapped_column(
-        JSONB,
-        nullable=True,
     )
 
     
