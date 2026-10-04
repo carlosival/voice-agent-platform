@@ -9,9 +9,12 @@ from fastapi import HTTPException, status, Request
 from pydantic import BaseModel, Field
 from src.persistence.repositories.pk_repo import PKRepository
 from src.persistence.repositories.user_repo import UserRepository
+from src.services.agent_config.agent_config import AgentConfigService
 from urllib.parse import urlparse
 
 logger = logging.getLogger(__name__)
+
+agent_config_service = AgentConfigService()
 
 DOMAIN = os.getenv("DOMAIN", "localhost")
 ALGORITHM = os.getenv("ALGORITHM", "HS256")
@@ -106,10 +109,12 @@ class InitController:
 
         if agent_config is None:
             logger.debug("Agent config cache MISS: %s", cache_key)
+            
             # --- DB operations after cache miss ---
             async with request.app.state.db() as db:
                 user_repo   = UserRepository(db)
-                agent_config = await user_repo.user_agent_config(
+                agent_config_service.set_repo(user_repo)
+                agent_config = await agent_config_service.get_config(
                     key_record.id, agent_uuid
                 )
 

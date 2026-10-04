@@ -7,7 +7,10 @@ import logging
 logger = logging.getLogger(__name__)
 
 class AgentConfigService:
-    def __init__(self, repo: UserRepository):
+    def __init__(self, repo: Optional[UserRepository] = None):
+        self.repo = repo
+
+    def set_repo(self, repo:UserRepository):
         self.repo = repo
 
     async def get_config(self, public_key_id, agent_id) -> Optional[dict]:
