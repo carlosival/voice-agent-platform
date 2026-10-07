@@ -1,24 +1,15 @@
-import asyncio
-import json
-import logging
-import os
-import signal
-import uuid
-import enum
+import asyncio, json, logging, os, signal, uuid, enum
 
 from aiortc import RTCPeerConnection, RTCSessionDescription, RTCIceCandidate
 from aiortc.sdp import candidate_from_sdp
 from redis.asyncio import Redis
 
-
-from peer.factory import create_peer
-from peer.config import build_rtc_config
-from peer.types import PeerSession
+from src.peer import create_peer, build_rtc_config, PeerSession
 
 from deps_provider import DepProvider
 
 #This worker use channels for exchange offer/answer WebRTC
-from dbs_clients import redis_client
+from src.clients.redis_db import redis_client
 
 logging.basicConfig(
     level=logging.INFO,

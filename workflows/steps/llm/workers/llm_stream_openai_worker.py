@@ -89,7 +89,8 @@ async def call_llm_stream_openai_worker(
         # ─────────────────────────────────────────────
 
         # ─────────────────────────────────────────────
-        # Build the prompt, messages and tools schema according to the LLM provider
+        # Build the prompt, messages and tools schema 
+        # this dependes of prompt strategy this case if for conversational only.
         # ─────────────────────────────────────────────
 
         # Build messages from history

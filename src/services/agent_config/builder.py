@@ -2,6 +2,12 @@ import copy, re, hashlib, json
 from datetime import datetime, timezone
 from typing import Any, Optional
 
+'''
+    Builder is responsable to serialize AGENT ORM object to JSON Schema Version.X
+    JSON Schema will be uses for all Workers through deps providers to Provide the ExecContext and run the workflows.
+'''
+
+
 
 SCHEMA_VERSION = 1
 
@@ -24,7 +30,7 @@ OVERRIDABLE_CUSTOM_KEYS: dict[str, type] = {
 
 OVERRIDABLE_TOOL_ATTRS = {"enabled", "config"}
 
-EXPECTED_ROOT_KEYS = {"schema_version", "meta", "access", "models", "prompt", "state", "tools","custom"}
+EXPECTED_ROOT_KEYS = {"schema_version", "meta", "access", "models", "prompt", "input","state", "tools","custom"}
 SECRET_HINTS = ("api_key", "apikey", "secret", "password", "token")
 
 
@@ -46,8 +52,66 @@ def _as_dict(value: Any) -> dict:
     return value if isinstance(value, dict) else {}
 
 
+def _json_type_ok(value: Any, t: Any) -> bool:
+    if t is None:
+        return True
+    if isinstance(t, list):
+        return any(_json_type_ok(value, x) for x in t)
+    if t == "integer":
+        return isinstance(value, int) and not isinstance(value, bool)
+    if t == "number":
+        return isinstance(value, (int, float)) and not isinstance(value, bool)
+    py = {"string": str, "boolean": bool, "object": dict, "array": list}.get(t)
+    return py is None or isinstance(value, py)
+
+
+def _resolve_input(schema: Any, patch: dict) -> dict[str, Any]:
+    schema = _as_dict(schema)
+    props = _as_dict(schema.get("properties"))
+    required = set(schema.get("required") or [])
+
+    unknown = set(patch) - set(props)
+    if unknown:
+        raise AgentConfigError(f"input has keys not in input_schema: {sorted(unknown)}")
+
+    values: dict[str, Any] = {}
+    for name, spec in props.items():
+        spec = _as_dict(spec)
+        if name in patch:
+            v = patch[name]
+        elif "default" in spec:
+            v = spec["default"]
+        elif name in required:
+            raise AgentConfigError(f"input.{name} is required by input_schema")
+        else:
+            continue
+
+        if not _json_type_ok(v, spec.get("type")):
+            raise AgentConfigError(f"input.{name} must be of type {spec.get('type')}")
+        if "enum" in spec and v not in spec["enum"]:
+            raise AgentConfigError(f"input.{name} must be one of {spec['enum']}")
+        values[name] = copy.deepcopy(v)
+    return values
+
+PLACEHOLDER_RE = re.compile(r"\{\{(.*?)\}\}", re.DOTALL)
+IDENT_RE = re.compile(r"^\w+$")
+
+
+def _template_placeholders(template: str) -> tuple[set[str], list[str]]:
+    """Returns (valid names, malformed raw placeholders)."""
+    names, bad = set(), []
+    for raw in PLACEHOLDER_RE.findall(template or ""):
+        name = raw.strip()
+        if IDENT_RE.match(name):
+            names.add(name)
+        else:
+            bad.append(raw)          # e.g. {{ user.name }}, {{ }}, {{a|upper}}
+    return names, bad
+
+
 def build_agent_config(assoc) -> dict[str, Any]:
     agent = assoc.agent
+    pk_id = assoc.public_key_id
     pv = agent.prompt_version
     state = pv.state
     override = _as_dict(assoc.custom_config_override)
@@ -115,6 +179,10 @@ def build_agent_config(assoc) -> dict[str, Any]:
         custom[k] = copy.deepcopy(v)
 
 
+    # ---- input: values for prompt.input_schema -------------------------
+    input_values = _resolve_input(pv.input_schema, _as_dict(override.get("input")))
+
+
     # ---- assemble ------------------------------------------------------
     body = {
         "schema_version": SCHEMA_VERSION,
@@ -131,6 +199,7 @@ def build_agent_config(assoc) -> dict[str, Any]:
             "input_schema": copy.deepcopy(pv.input_schema),
             "output_schema": copy.deepcopy(pv.output_schema),
         },
+        "input": input_values,
         "state": {"fields": fields},
         "tools": tools,
         "custom": custom,
@@ -142,6 +211,7 @@ def build_agent_config(assoc) -> dict[str, Any]:
     return {
         "meta": {
             "agent_id": str(agent.id),
+            "pk_id": str(pk_id),
             "name": agent.name,
             "strategy": agent.strategy,
             "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -196,10 +266,7 @@ def validate_agent_config(cfg: dict) -> list[str]:
              f"state.fields.{name} keys unexpected: {set(f)}")
         need(isinstance(f.get("required"), bool), f"state.fields.{name}.required must be bool")
 
-    # every {{placeholder}} in the template must be a known state field
-    placeholders = set(re.findall(r"\{\{\s*(\w+)\s*\}\}", prompt.get("template", "")))
-    need(placeholders <= set(fields), f"template uses unknown placeholders: {placeholders - set(fields)}")
-
+   
     # tools
     for name, t in cfg.get("tools", {}).items():
         need(set(t) == {"id", "description", "parameters", "output_schema", "config"},
@@ -212,6 +279,39 @@ def validate_agent_config(cfg: dict) -> list[str]:
     need(isinstance(custom, dict), "custom must be dict")
     need(set(custom) <= set(OVERRIDABLE_CUSTOM_KEYS),
          f"custom has unknown keys: {set(custom) - set(OVERRIDABLE_CUSTOM_KEYS)}")
+
+
+    # input
+    inp = cfg.get("input", {})
+    need(isinstance(inp, dict), "input must be dict")
+    schema_props = _as_dict(_as_dict(prompt.get("input_schema")).get("properties"))
+    need(set(inp) <= set(schema_props),
+         f"input has keys not in prompt.input_schema: {set(inp) - set(schema_props)}")
+    for name in _as_dict(prompt.get("input_schema")).get("required") or []:
+        need(name in inp, f"input.{name} is required by prompt.input_schema")
+    for name, v in inp.items():
+        need(_json_type_ok(v, _as_dict(schema_props.get(name)).get("type")),
+             f"input.{name} has wrong type")
+
+    # --- every template placeholder must have an input ---
+    input_schema = _as_dict(prompt.get("input_schema"))
+    schema_props = _as_dict(input_schema.get("properties"))
+    schema_required = set(input_schema.get("required") or [])
+
+    placeholders, malformed = _template_placeholders(prompt.get("template", ""))
+
+    need(not malformed, f"template has malformed placeholders: {malformed}")
+
+    for p in sorted(placeholders):
+        need(p in schema_props,
+             f"template uses {{{{{p}}}}} but input_schema.properties has no '{p}'")
+        need(p in schema_required,
+             f"template uses {{{{{p}}}}} but '{p}' is not in input_schema.required")
+        need(p in inp,
+             f"template uses {{{{{p}}}}} but input.{p} has no value")
+
+    both = placeholders & set(fields)
+    need(not both, f"placeholders also declared as state fields: {sorted(both)}")
 
     # secrets must not be stored in the config
     def scan(obj, path=""):

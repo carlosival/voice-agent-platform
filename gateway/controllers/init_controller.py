@@ -139,8 +139,8 @@ class InitController:
         session_id = str(uuid.uuid4())
         expiration = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(seconds=TOKEN_EXPIRATION_SECONDS)
         token_claims = {
-            "tier": agent_config.get("tier"),
-            "regions": agent_config.get("regions"),
+            "tier": agent_config.get("access").get("tier"),
+            "regions": agent_config.get("access").get("regions"),
             "session_id": session_id,
             "pk_id": str(key_record.id),
             "agent_id": agent_id,

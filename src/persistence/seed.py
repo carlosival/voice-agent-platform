@@ -24,6 +24,7 @@ from src.persistence.models import (
     StateFieldAssociations,
     Field,
 )
+ENV = "dev"
 
 # Target your Docker Compose environment configuration
 DATABASE_URL = os.getenv(
@@ -38,9 +39,9 @@ engine = create_async_engine(DATABASE_URL, echo=True)
 AsyncSessionLocal = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
 # Configuration templates for the dynamic mock AI properties
-MOCK_LLM = {"model": "llama-3-70b", "temperature": 0.7}
-MOCK_TTS = {"voice_id": "en-US-Neural-A", "engine": "cartesia", "speed": 1.0}
-MOCK_STT = {"engine": "deepgram", "model": "nova-2", "language": "en"}
+MOCK_LLM = {"model": "llama-3.3-70b-versatile", "engine": "groq", "temperature": 0}
+MOCK_TTS = {"voice_id": "sharvard", "language": "es","engine": "speaches", "speed": 1.0, "model":"speaches-ai/piper-es_ES-sharvard-medium"}
+MOCK_STT = {"engine": "groq", "model": "whisper-large-v3-turbo", "language": "es"}
 
 # Valid values matching your model's constraints
 TIERS = ["standard"]
@@ -147,7 +148,7 @@ TOOL_FIXTURES = [
         "output_schema": None,
     },
     {
-        "name": "create_ticket",
+        "name": "end_conversation",
         "description": "Create a support ticket in the helpdesk.",
         "input_schema": {
             "type": "object",
@@ -174,6 +175,26 @@ SYSTEM_AGENTS = [
 
 def now():
     return datetime.now(timezone.utc)
+
+def seed_infisical_secrets(
+    client: InfisicalSDKClient,
+    public_key_id: uuid.UUID,
+) -> None:
+    secret_path = f"/{public_key_id}"
+
+    for key in INFISICAL_KEYS:
+        client.secrets.create_secret(
+            secret_name=key,
+            secret_value=f"seed-{key.lower()}",
+            project_id=INFISICAL_PROJECT_ID,
+            environment_slug=ENV,
+            secret_path=secret_path,
+        )
+
+        print(
+            f"🔐 Created Infisical secret: "
+            f"{ENV}/{public_key_id}/{key}"
+        )
 
 
 async def seed_fixtures():

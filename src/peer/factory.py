@@ -1,9 +1,8 @@
 
-import logging
-from peer.config import build_rtc_config
-from peer.types import PeerDependencies, PeerSession
+import logging, asyncio
+from .config import build_rtc_config
+from .types import PeerDependencies, PeerSession
 from aiortc import RTCPeerConnection
-import asyncio
 
 logger = logging.getLogger(__name__)
 

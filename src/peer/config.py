@@ -1,7 +1,7 @@
 import time
 import os
 import logging
-from services import fetch_cloudflare_ice_servers
+from src.services import fetch_cloudflare_ice_servers
 from aiortc import RTCIceServer, RTCConfiguration
 
 logger = logging.getLogger(__name__)

@@ -19,6 +19,9 @@ load_map = {
     "s3": prompt_load_s3
 }
 
+
+
+
 def get_prompt(location: dict[str, str]):
 
     type_resource = location.get("resource").strip().lower()

@@ -8,27 +8,27 @@ logger = logging.getLogger(__name__)
 
 class EndConversationTool(Tool):
     name = "end_conversation"
-    description = "Use this tool when you considered the conversation is finished."
+    description = "Use this tool when you consider the conversation is finished."
     inputs = {
         "confirm": {
             "type": "string",
-            "description": "Set to True to confirm closing the chat session.",
-            "nullable": True
+            "description": 'Use "true" to confirm closing the chat session, "false" to keep it open.',
+            "nullable": True,
         }
-        }  # required even if empty
+    }
     output_type = "any"
 
-    def forward(self, confirm: Any = "true") -> Any:
-        # Pydantic will now pass whatever the LLM sent directly into here
-        if isinstance(confirm, str):
-            confirm_bool = confirm.lower().strip() in ("true", "1", "yes")
-        elif isinstance(confirm, bool):
-            confirm_bool = confirm
-        else:
-            confirm_bool = True
-            
-        if confirm_bool:
-            logger.info("[EndConversationTool] Tool executed successfully, sending EndOfStream signal.")
+    def __init__(self, config: dict | None = None, **kwargs):
+        super().__init__(**kwargs)
+        self._cfg = config or {}
+        
+
+    def forward(self, confirm: str | None = "true") -> Any:
+        # None (omitted by the LLM) means "yes"; otherwise only explicit yes-values end the call
+        value = "true" if confirm is None else str(confirm).strip().lower()
+
+        if value in ("true", "1", "yes"):
+            logger.info("[EndConversationTool] Sending EndOfStream signal.")
             return EndOfStream()
-            
+
         return "Conversation continuation requested."

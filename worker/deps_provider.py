@@ -1,6 +1,6 @@
 from yaafpy import ExecContext
-from peer.types import PeerDependencies
-from pipelines.audio_pipeline import audio_pipeline
+from src.peer import PeerDependencies, PeerSession
+from src.pipelines.audio_pipeline import audio_pipeline
 from workflows.utils.tools import EndConversationTool
 from workflows.utils.memory import InMemoryMemory
 from workflows.utils.observavility import get_tracer
@@ -9,26 +9,45 @@ from workflows.steps.outputs import AudioOutputTrack
 from httpx import AsyncClient
 from aiortc import RTCPeerConnection, RTCIceCandidate
 from aiortc.sdp import candidate_to_sdp
-from peer.types import PeerSession
-import logging
-import json
-from dbs_clients import redis_client
+
+import logging, json, time, asyncio, re
+
+from src.clients.redis_db import redis_client
+
 from typing import Any
-import time
-import asyncio
-from workflows.utils.context import get_prompt
-from services.vault.secrets import Secrets
+
+from src.services.vault.secrets import Secrets
 
 
 logger = logging.getLogger(__name__)
 
 # Global singletons
-end_conversation_tool = EndConversationTool()
+
 http_client = AsyncClient(timeout=60.0)
 tracer = get_tracer(http_client)
 vault = Secrets(lambda key, path: None)
-tools = [end_conversation_tool]
+TOOL_CLASSES = {'end_conversation': EndConversationTool}
 
+
+_PLACEHOLDER = re.compile(r"\{\{\s*(\w+)\s*\}\}")
+
+
+def render_template(template: str, values: dict, *, strict: bool = False) -> str:
+    """Replace {{name}} with values["name"].
+
+    strict=False: unknown placeholders stay as {{name}} (useful for state
+                  placeholders that are filled later during the call).
+    strict=True:  unknown placeholders raise KeyError.
+    """
+    def repl(m: re.Match) -> str:
+        name = m.group(1)
+        if name in values:
+            return str(values[name])
+        if strict:
+            raise KeyError(f"Missing value for placeholder: {name}")
+        return m.group(0)               # leave it untouched
+
+    return _PLACEHOLDER.sub(repl, template)
 
 
 class DepProvider:
@@ -48,40 +67,48 @@ class DepProvider:
 
         logger.info(f"Agent config: {agent_config}")
 
+        pk_id = agent_config["meta"]["pk_id"]
+
         # 1. Load Trace Context
         session_trace_id = tracer.create_trace_id(seed=session_id)
 
         # 2. Load Tools
         tools_registry = {}
-        tool_configs = agent_config.get("llm_config", {}).get("tools",[])
+        tool_configs = agent_config.get("tools",{})
         
-        for tool in tools:
-            if tool.name in tool_configs:
-                tools_registry[tool.name] = tool
+        for key, spec in agent_config["tools"]:
+            cls = TOOL_CLASSES.get(key)
+            if cls is None:
+                raise AgentConfigError(f"No implementation for tool: {key}")
+            
+            # Inject public_key_id in all configurations is essential for vault to form the path and find key
+            # Maybe if not inyected from db configurations
+            cfg = copy.deepcopy(spec["config"])
+            cfg["pk_id"] = pk_id
+            tools_registry[key] = cls(cfg)
 
         # 3. Load Prompts
-        system_prompt = get_prompt(agent_config.get("llm_config", {}).get("system_prompt", None))
+        system_prompt = render_template(agent_config["prompt"]["template"], agent_config["input"])
+        
+        #system_prompt = get_prompt(agent_config.get("llm_config", {}).get("system_prompt", None))
 
         ctx = ExecContext(shared_data={
             "tools": tools_registry,
             "system_prompt": system_prompt,
-            "llm_api_key": vault.get_secret(agent_config.get("public_key"), "LLM_API_KEY"),
-            "stt_api_key": vault.get_secret(agent_config.get("public_key"), "STT_API_KEY"),
-            "tts_api_key": vault.get_secret(agent_config.get("public_key"), "TTS_API_KEY"),
-            "llm_temperature": agent_config.get("llm_config", {}).get("temperature", None),
-            "llm_max_tokens": agent_config.get("llm_config", {}).get("max_tokens", None),
-            "llm_top_p": agent_config.get("llm_config", {}).get("top_p", None),
-            "tts_provider":agent_config.get("tts_config",{}).get("engine", None),
-            "stt_provider": agent_config.get("stt_config",{}).get("engine",None),
+            "llm_api_key": vault.get_secret(pk_id, "LLM_API_KEY"),
+            "stt_api_key": vault.get_secret(pk_id, "STT_API_KEY"),
+            "tts_api_key": vault.get_secret(pk_id, "TTS_API_KEY"),
+            "tts_provider":agent_config.get("models",{}).get("tts",{}).get("engine", None),
+            "stt_provider": agent_config.get("models",{}).get("stt",{}).get("engine",None),
             "session_id": session_id,
             "trace_context": {"trace_id": session_trace_id, "parent_span_id": ""},
             "peer_state": {
                 "connected_at": time.time(),
                 "last_activity": time.time(),
             },
-            "stt_config": agent_config.get("stt_config",{}),
-            "tts_config": agent_config.get("tts_config",{}),
-            "llm_config": agent_config.get("llm_config",{}),
+            "stt_config": agent_config.get("models",{}).get("stt",{}),
+            "tts_config": agent_config.get("models",{}).get("tts",{}),
+            "llm_config": agent_config.get("models", {}).get("llm",{}),
             "message_history": InMemoryMemory(),
             "resources": {
                 "output_track": AudioOutputTrack(),

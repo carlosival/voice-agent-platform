@@ -27,10 +27,14 @@ COPY src/clients/ ./src/clients/
 COPY src/services/ ./src/services/
 COPY src/peer/ ./src/peer/
 COPY src/pipelines/ ./src/pipelines/ 
-COPY workflows/ .workflows/ 
-COPY worker/ .worker/ 
+COPY workflows/ ./workflows/ 
+
+# Worker Files
+COPY worker/worker.py .
+COPY worker/deps_provider.py .
+
 
 # Updated to match the new workdir path
 ENV PYTHONPATH="/app"
 
-CMD ["python", "worker/worker.py"]
+CMD ["python", "worker.py"]

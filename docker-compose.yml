@@ -342,6 +342,12 @@ services:
       TIER: standard
       REGION: eu-west-1
 
+      # ── VAULT ──────────────────────────────────────────────────────────
+      VAULT_HOST: ${VAULT_HOST}
+      VAULT_PROJECT_ID: ${VAULT_PROJECT_ID}
+      VAULT_MACHINE_IDENTITY_CLIENT_ID: ${VAULT_MACHINE_IDENTITY_CLIENT_ID}
+      VAULT_MACHINE_IDENTITY_CLIENT_SECRET: ${VAULT_MACHINE_IDENTITY_CLIENT_SECRET}
+
 
     depends_on:
       redis:
