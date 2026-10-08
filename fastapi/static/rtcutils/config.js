@@ -1,6 +1,6 @@
 const AppConfig = Object.freeze({
 
-    AGENT_ID: '6ea640d3-a867-4e2f-a04e-b467680ec75d',
-    PK: 'ed25519_pk_2095d5ff946d545cc37ac79462313bea',
+    AGENT_ID: '1e18cb58-6532-40a6-8963-52e951faefa2',
+    PK: 'ed25519_pk_96af6d4dbed4ddfc2914575d2334b043',
 
 });

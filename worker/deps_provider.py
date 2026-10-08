@@ -16,7 +16,7 @@ from src.clients.redis_db import redis_client
 
 from typing import Any
 
-from src.services.vault.secrets import Secrets
+from src.services.vault.infiscal import get_secrets
 
 
 logger = logging.getLogger(__name__)
@@ -25,7 +25,6 @@ logger = logging.getLogger(__name__)
 
 http_client = AsyncClient(timeout=60.0)
 tracer = get_tracer(http_client)
-vault = Secrets(lambda key, path: None)
 TOOL_CLASSES = {'end_conversation': EndConversationTool}
 
 
@@ -92,12 +91,15 @@ class DepProvider:
         
         #system_prompt = get_prompt(agent_config.get("llm_config", {}).get("system_prompt", None))
 
+        secrets = get_secrets(f"/{pk_id}",["LLM_API_KEY", "STT_API_KEY", "TTS_API_KEY"])
+
+
         ctx = ExecContext(shared_data={
             "tools": tools_registry,
             "system_prompt": system_prompt,
-            "llm_api_key": vault.get_secret(pk_id, "LLM_API_KEY"),
-            "stt_api_key": vault.get_secret(pk_id, "STT_API_KEY"),
-            "tts_api_key": vault.get_secret(pk_id, "TTS_API_KEY"),
+            "llm_api_key": secrets[0],
+            "stt_api_key": secrets[1],
+            "tts_api_key": secrets[2],
             "tts_provider":agent_config.get("models",{}).get("tts",{}).get("engine", None),
             "stt_provider": agent_config.get("models",{}).get("stt",{}).get("engine",None),
             "session_id": session_id,
