@@ -1,6 +1,7 @@
 from typing import Dict, AsyncGenerator
 from .workers import call_llm_stream_openai_worker, get_llm_provider_worker, get_provider_url
 from workflows.signals import SignalFrame, WarmUp, AskUserStillThere, EndOfStream, StartSpeaking
+from workflows.utils.tools import Tool
 from yaafpy.types import ExecContext
 import logging 
 import asyncio
@@ -19,7 +20,7 @@ async def llm_stream(
     sentence_queue = None  # ← initialize to None, not unbound
     http_client:     httpx.AsyncClient = ctx.shared_data["resources"]["http_client"]
     message_history: InMemoryMemory = ctx.shared_data["message_history"]
-    tools: Dict[str, Tool] = ctx.shared_data.get("tools", {}) # Dict[str, Tool] smolagent
+    tools: dict[str, Tool] = ctx.shared_data.get("tools", {}) # Dict[str, Tool] smolagent
     system_prompt = ctx.shared_data.get("system_prompt", "")
     provider_name = ctx.shared_data["llm_config"]["engine"]
     provider_url = get_provider_url(provider_name)

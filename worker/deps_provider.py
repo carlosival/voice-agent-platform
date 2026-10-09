@@ -10,7 +10,7 @@ from httpx import AsyncClient
 from aiortc import RTCPeerConnection, RTCIceCandidate
 from aiortc.sdp import candidate_to_sdp
 
-import logging, json, time, asyncio, re
+import logging, json, time, asyncio, re, copy
 
 from src.clients.redis_db import redis_client
 
@@ -75,14 +75,13 @@ class DepProvider:
         tools_registry = {}
         tool_configs = agent_config.get("tools",{})
         
-        for key, spec in agent_config["tools"]:
+        for key, spec in tool_configs.items():
             cls = TOOL_CLASSES.get(key)
             if cls is None:
                 raise AgentConfigError(f"No implementation for tool: {key}")
             
-            # Inject public_key_id in all configurations is essential for vault to form the path and find key
-            # Maybe if not inyected from db configurations
-            cfg = copy.deepcopy(spec["config"])
+            # Inject public_key_id in all configurations is essential for vault to form the path and finds the keys
+            cfg = copy.deepcopy(spec.get("config", {}))
             cfg["pk_id"] = pk_id
             tools_registry[key] = cls(cfg)
 

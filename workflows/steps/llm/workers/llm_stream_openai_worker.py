@@ -2,6 +2,7 @@ import asyncio
 from typing import Optional
 from httpx import AsyncClient
 from workflows.utils.memory import IMemory
+from workflows.utils.tools import Tool
 from workflows.utils.tools.tool_types import ToolCallChunk
 from workflows.utils.tools.tool_executor import execute_tool
 from workflows.utils.context.message_context_builder import build_chat_messages
@@ -57,7 +58,7 @@ def sanitize_sentence(text: str) -> str:
 async def call_llm_stream_openai_worker(
     text: str,
     memory: IMemory, # The last message is the user input already included in memory
-    tools: Optional[list] = None,
+    tools: dict[str, Tool] = None,
     http_client: Optional[AsyncClient] = None,
     tracing_data: Optional[dict] = None, # {"tracer": tracer, "trace_id": trace_id, "parent_span_id": parent_span_id}
     model: Optional[str] = None,
@@ -100,7 +101,7 @@ async def call_llm_stream_openai_worker(
         # Refactor: Refactor to a function tool_schema_builder
         if tools:
             tools_schema = [get_tool_json_schema(t) for t in tools.values()]
-            print(f"DEBUG: tools_schema value is {tools_schema}")
+            logger.info(f"DEBUG: tools_schema value is {tools_schema}")
         else:
             tools_schema = None
 
