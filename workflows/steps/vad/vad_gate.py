@@ -1,8 +1,4 @@
-from .config import (
-    PRE_ROLL_LEN, MAX_UTTERANCE_LEN, SILERO_ACCUM,
-    INACTIVITY_STOP, MAX_ASK_USER, INACTIVITY_FRAMES,
-    START_FRAMES, STOP_FRAMES, 
-)
+
 from workflows.steps.turn.utils import predict_endpoint
 from workflows.signals import SignalFrame, WarmUp, AskUserStillThere, EndOfStream, StartSpeaking, EndSpeaking
 from .utils import silero_has_speech_from_numpy
@@ -11,9 +7,16 @@ from av import AudioFrame
 from typing import AsyncGenerator
 from enum import Enum
 from collections import deque
-import logging
+import logging, uuid
 import numpy as np
 
+from opentelemetry.trace import Status, StatusCode, set_span_in_context
+
+from .config import (
+    PRE_ROLL_LEN, MAX_UTTERANCE_LEN, SILERO_ACCUM,
+    INACTIVITY_STOP, MAX_ASK_USER, INACTIVITY_FRAMES,
+    START_FRAMES, STOP_FRAMES, 
+)
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +33,11 @@ class VADState(Enum):
     STOPPING = 4
 
 async def vad_gate(source: AsyncGenerator, ctx: ExecContext) -> AsyncGenerator[list[AudioFrame], None]:
+
+    conversation_span = ctx.shared_data["trace_context"]["conversation_span"]
+    tracer = ctx.shared_data["resources"]["tracer"]
+    session_id = ctx.shared_data["session_id"]
+
     state          = VADState.QUIET
     starting_count = 0
     stopping_count = 0
@@ -38,7 +46,7 @@ async def vad_gate(source: AsyncGenerator, ctx: ExecContext) -> AsyncGenerator[l
     consecutive_silence_counter = 0
     ask_user = 0
     end_speech_check = False
-    
+    current_turn = None
     # This holds audio history during silent periods
     pre_roll_history = deque(maxlen=PRE_ROLL_LEN)
 
@@ -120,8 +128,25 @@ async def vad_gate(source: AsyncGenerator, ctx: ExecContext) -> AsyncGenerator[l
                                 state = VADState.SPEAKING
                                 consecutive_silence_counter = 0
                                 ask_user = 0
+                                # SIGNAL 0: Signal new Turn start and stop old turn if there is one
+                                if current_turn:
+                                    current_turn.set_status(Status(StatusCode.OK))
+                                    current_turn.end()
+                                
+                                turn_context = set_span_in_context(conversation_span)
+
+                                current_turn = tracer.start_span(
+                                                "turn",
+                                                context=turn_context,
+                                                attributes={
+                                                    "session.id": session_id,
+                                                    "turn.id": str(uuid.uuid4()),
+                                                },
+                                            )
+                                yield current_turn
                                 # SIGNAL 1: Signal other process to Stop the workers
                                 yield StartSpeaking()
+                                
                         case VADState.SPEAKING:
                             pass
                         case VADState.STOPPING:
@@ -158,9 +183,11 @@ async def vad_gate(source: AsyncGenerator, ctx: ExecContext) -> AsyncGenerator[l
                                     probability = prediction.get("probability", 0.0) if isinstance(prediction, dict) else float(prediction)
 
                                     if probability >= 0.60:
-                                        logger.info(f"TURN: Endpoint detected (prob: {probability:.2f}). Ending turn.")
+                                        logger.info(f"TURN: Endpoint detected (prob: {probability:.2f}). Ending Speaking Turn Start.")
                                         state          = VADState.QUIET
+                                        # SIGNAL 3: User is done speaking by model prediction.
                                         yield EndSpeaking()
+                                        # 4. NOW send the data
                                         yield utterance_buf
                                         utterance_buf  = []
                                         starting_count = 0
@@ -173,7 +200,7 @@ async def vad_gate(source: AsyncGenerator, ctx: ExecContext) -> AsyncGenerator[l
                             if stopping_count >= STOP_FRAMES:
                                 logger.info(f"VAD: → {len(utterance_buf)} frames ({len(utterance_buf)*20}ms)")
                                 state          = VADState.QUIET
-                                # SIGNAL 3: User is done.
+                                # SIGNAL 3: User is done speaking by silence time.
                                 yield EndSpeaking()
                                 # 4. NOW send the data
                                 yield utterance_buf
@@ -198,5 +225,15 @@ async def vad_gate(source: AsyncGenerator, ctx: ExecContext) -> AsyncGenerator[l
         # (disconnects, decode errors, etc.) so we exit cleanly instead
         # of raising an unhandled exception out of the generator.
         logger.exception("VAD: fatal error reading from source, ending stream", exc_info=1)
+        # Close current turn
+        if current_turn:
+            current_turn.set_status(Status(StatusCode.ERROR))
+            current_turn.end()
+            current_turn = None
         yield EndOfStream()
         return
+
+    finally: 
+        if current_turn:
+            current_turn.set_status(Status(StatusCode.OK))
+            current_turn.end()

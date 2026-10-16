@@ -60,7 +60,7 @@ async def call_llm_stream_openai_worker(
     memory: IMemory, # The last message is the user input already included in memory
     tools: dict[str, Tool] = None,
     http_client: Optional[AsyncClient] = None,
-    tracing_data: Optional[dict] = None, # {"tracer": tracer, "trace_id": trace_id, "parent_span_id": parent_span_id}
+    tracing_data: Optional[dict] = None, # {"tracer": tracer, "parent_span": turn_span}
     model: Optional[str] = None,
     system_prompt: Optional[str] = None,
     provider_url: str = None,

@@ -33,9 +33,15 @@ class PeerSession:
     def add_task(self, task):
         self.tasks.add(task)
         task.add_done_callback(self.tasks.discard)
+    
     def set_pc(self, pc):
         self.pc = pc
 
     def set_ctx(self, ctx):
         self.ctx = ctx
+
+    def cancel_all_tasks(self):
+        for task in tasks:
+            if not task.done():
+                task.cancel()
         

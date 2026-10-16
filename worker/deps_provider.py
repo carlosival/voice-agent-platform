@@ -10,6 +10,10 @@ from httpx import AsyncClient
 from aiortc import RTCPeerConnection, RTCIceCandidate
 from aiortc.sdp import candidate_to_sdp
 
+from opentelemetry import trace
+
+
+
 import logging, json, time, asyncio, re, copy
 
 from src.clients.redis_db import redis_client
@@ -18,13 +22,16 @@ from typing import Any
 
 from src.services.vault.infiscal import get_secrets
 
+from workflows.utils.observavility.voice_otel import setup_tracing, get_tracer, get_provider 
 
 logger = logging.getLogger(__name__)
+trace_providder = setup_tracing()
+
 
 # Global singletons
 
 http_client = AsyncClient(timeout=60.0)
-tracer = get_tracer(http_client)
+tracer = get_tracer()
 TOOL_CLASSES = {'end_conversation': EndConversationTool}
 
 
@@ -68,8 +75,16 @@ class DepProvider:
 
         pk_id = agent_config["meta"]["pk_id"]
 
-        # 1. Load Trace Context
-        session_trace_id = tracer.create_trace_id(seed=session_id)
+        # 1. Start the root conversation span
+        conversation_span = tracer.start_span(
+            "conversation",
+            attributes={
+                "session.id": session_id,
+                "agent.id": str(agent_config.get("meta", {}).get("pk_id", "")),
+                # Refactor Add other related attr that allows to track back state, prompt version, tools, etc
+                # How this agent was construct
+            },
+        )
 
         # 2. Load Tools
         tools_registry = {}
@@ -94,19 +109,19 @@ class DepProvider:
 
 
         ctx = ExecContext(shared_data={
-            "tools": tools_registry,
-            "system_prompt": system_prompt,
+            "tools": tools_registry, # Add tool related DB ID
+            "system_prompt": system_prompt, # Add Prompt Version Related ID
             "llm_api_key": secrets[0],
             "stt_api_key": secrets[1],
             "tts_api_key": secrets[2],
             "tts_provider":agent_config.get("models",{}).get("tts",{}).get("engine", None),
             "stt_provider": agent_config.get("models",{}).get("stt",{}).get("engine",None),
             "session_id": session_id,
-            "trace_context": {"trace_id": session_trace_id, "parent_span_id": ""},
-            "peer_state": {
-                "connected_at": time.time(),
-                "last_activity": time.time(),
-            },
+            "trace_context": { 
+                               "tracer":tracer,  
+                               "parent_span": None,
+                               "conversation_span": conversation_span,
+                            },
             "stt_config": agent_config.get("models",{}).get("stt",{}),
             "tts_config": agent_config.get("models",{}).get("tts",{}),
             "llm_config": agent_config.get("models", {}).get("llm",{}),
@@ -115,6 +130,7 @@ class DepProvider:
                 "output_track": AudioOutputTrack(),
                 "http_client": http_client,
                 "tracer": tracer,
+                "tracer_provider": trace_providder,
                 "pc": None, # Will be set when the peer is created
             }
         })
@@ -149,6 +165,8 @@ class DepProvider:
 
         def on_terminated() -> None:
             logger.info("Session terminated — cleaning up")
+            # conversation span will be close in the pipeline with the respective Error o Success msg
+    
             # ctx is already in scope via closure
             asyncio.create_task(ctx.shared_data["resources"]["pc"].close())
             active_sessions.pop(session_id, None)  

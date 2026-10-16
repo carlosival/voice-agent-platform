@@ -1,11 +1,27 @@
 from workflows.steps.llm.types import LLMEvent
 from typing import Optional, AsyncGenerator
 from openai import AsyncOpenAI
-import httpx, json, logging, asyncio
+import httpx, json, logging, asyncio, time
+from urllib.parse import urlparse
 
+from opentelemetry.trace import Status, StatusCode, set_span_in_context
+from openinference.semconv.trace import (
+    ToolCallAttributes,
+    SpanAttributes,
+    AudioAttributes,
+    OpenInferenceSpanKindValues,
+    OpenInferenceMimeTypeValues,
+    OpenInferenceLLMSystemValues
+)
 
 logger = logging.getLogger(__name__)
 
+# No semconv constants for these, keep them in one place (same idea as STTAttributes).
+class LLMStreamAttributes:
+    TTFT_MS = "llm.stream.ttft_ms"
+    FINISH_REASON = "llm.stream.finish_reason"
+    INTERRUPTED = "llm.stream.interrupted"
+    BASE_URL_HOST = "llm.stream.base_url_host"
 
 # Keys accepted by client.chat.completions.create(), beyond model/messages/tools/stream
 # which are already handled explicitly above.
@@ -119,36 +135,30 @@ async def call_llm_stream_openai(
 
     # --- MINIMAL TRACING HOOKS ---
     tracer = tracing_data.get("tracer") if tracing_data else None
-    trace_id = tracing_data.get("trace_id") if tracing_data else None
-    parent_span_id = tracing_data.get("parent_span_id") if tracing_data else None
-    span = None
-
-    if tracer and trace_id:
-
-        # Build a complete input object containing both messages and available tools or prompt
-        trace_input = {}
-        if messages:
-            trace_input["messages"] = messages
-        if prompt:
-            trace_input["prompt"] = prompt
-        if tools:
-            trace_input["tools"] = tools  # <-- Pass the available tools here
-
-        # Refactor this to get more data like TTFT, Token Usage, etc.
-        span = tracer.start_observation(
-            name="llm_stream_generation",
-            as_type="generation",
-            model=model,
-            input=trace_input,
-            trace_context={"trace_id": trace_id, "parent_span_id": parent_span_id}  # Links cleanly as a child under the WebRTC session
-        )
+    parent_turn = tracing_data.get("parent_span") if tracing_data else None
+    parent_ctx = set_span_in_context(parent_turn) 
+    
+    span = tracer.start_span(
+        "llm.stream",
+        context=parent_ctx,
+        attributes={
+            SpanAttributes.OPENINFERENCE_SPAN_KIND: OpenInferenceSpanKindValues.LLM.value,
+            SpanAttributes.LLM_REQUEST_MODEL_NAME: model or "unknown",
+            SpanAttributes.LLM_SYSTEM: OpenInferenceLLMSystemValues.OPENAI.value,  # OpenAI-compatible API 
+            LLMStreamAttributes.BASE_URL_HOST: urlparse(provider_url).hostname or provider_url if provider_url else "",
+        },
+    )
+    
 
     accumulated_text = "" # Only for debug pourposes yield individual token
     # Track accumulated tool calls by their delta index
     accumulated_tools = {}
     final_reason = "unknown"
 
+    ttft_ms: float | None = None
+
     try:
+        t0 = time.perf_counter()
         async with await client.chat.completions.create(**kwargs) as stream:
             async for chunk in stream:
                 logger.debug(f"[raw_chunk] got chunk: {chunk}")  
@@ -164,7 +174,11 @@ async def call_llm_stream_openai(
                 tool_calls = getattr(delta, "tool_calls", None) or []
 
                 if token:
+                    if ttft_ms is None:
+                        ttft_ms = (time.perf_counter() - t0) * 1000
+                        span.add_event(LLMStreamAttributes.TTFT_MS)
                     accumulated_text += token
+                    
                     yield {"event": "token", "data": token}
 
                 for tc in tool_calls:
@@ -203,32 +217,29 @@ async def call_llm_stream_openai(
                             }
 
                 if finish_reason:
-                    # Convert our tracking dict back into a clean list for the tracer
-                    final_tools = [tool for idx, tool in sorted(accumulated_tools.items())]
+                    
+                                     
+                    for idx, tool in sorted(accumulated_tools.items()):
+                        span.set_attribute(ToolCallAttributes.TOOL_CALL_FUNCTION_NAME, tool["name"])
+                        span.set_attribute(ToolCallAttributes.TOOL_CALL_FUNCTION_ARGUMENTS_JSON, tool["arguments"])
+                                    
+                    span.set_attribute(SpanAttributes.LLM_FINISH_REASON, finish_reason) 
+                             
 
-                    # Stream ended cleanly -> update output data
-                    if span:
-                        span.update(output={"text": accumulated_text, "tool_calls": final_tools, "finish_reason": finish_reason})
                     yield {"event": "finish", "data": finish_reason}
         
         
-    except asyncio.CancelledError:
-        # User barged in and interrupted the stream
+    except (asyncio.CancelledError, GeneratorExit):
+        # User barged in (task cancelled) or the consumer stopped iterating.
         logger.info("[LLM Engine] Stream cut short by user barge-in.")
-        # Convert our tracking dict back into a clean list for the tracer
-        final_tools = [tool for idx, tool in sorted(accumulated_tools.items())]
-        if span:
-            span.update(
-                level="WARNING",
-                status_message="Stream dropped due to user interruption event.",
-                output={"text": accumulated_text + "... [Cut Off]","tool_calls": final_tools, "finish_reason": "barge_in"}
-            )
-        raise  # Must re-raise CancelledError for proper pipeline task cleanup
+        interrupted = True
+        raise  # must re-raise for proper pipeline task cleanup
     except Exception as e:
         logger.error(f"Error calling LLM: {e}")
-        yield {"event": "error", "data": str(e)}
-        if span:
-            span.update(level="ERROR", status_message=str(e))
+        failed = True
+        span.record_exception(e)
+        span.set_status(Status(StatusCode.ERROR, str(e)))
+        yield {"event": "error", "data": str(e)}    
     finally:
         if own_http_client:
             await http_client.aclose()

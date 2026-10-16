@@ -11,6 +11,7 @@ from av import AudioFrame
 import os
 import numpy as np
 
+
 STT_BASE_URL = os.getenv("STT_BASE_URL",  "http://speaches:8000")
 STT_MODEL    = os.getenv("STT_MODEL",     "Systran/faster-whisper-large-v3")
 STT_LANGUAGE = os.getenv("STT_LANGUAGE",  "es")
@@ -45,7 +46,14 @@ def frames_to_pcm_s16le(frames: list[AudioFrame]) -> bytes:
 
     return b"".join(pcm_chunks)
 
-async def call_stt(frames: list[AudioFrame], model: str = STT_MODEL, language: str = STT_LANGUAGE, api_key: str = STT_API_KEY, base_url: str = STT_BASE_URL, http_client: Optional[httpx.AsyncClient] = None) -> str:
+async def call_stt( frames: list[AudioFrame], 
+                    model: str = STT_MODEL, 
+                    provider:str ="unknow", 
+                    language: str = STT_LANGUAGE, 
+                    api_key: str = STT_API_KEY, 
+                    base_url: str = STT_BASE_URL, 
+                    http_client: Optional[httpx.AsyncClient] = None, 
+                    tracing_data: dict = {}) -> str:
     # Flatten the list of AudioFrame objects into one PCM byte string
     # Silero frames:
     # float32 / mono / 16 kHz
@@ -53,4 +61,12 @@ async def call_stt(frames: list[AudioFrame], model: str = STT_MODEL, language: s
     # Convert to:
     # int16 / mono / 16 kHz
     pcm_s16le_bytes = frames_to_pcm_s16le(frames)
-    return await call_stt_openai(pcm_s16le_bytes, model, language, api_key, base_url, http_client)
+    return await call_stt_openai(audio=pcm_s16le_bytes, 
+                                model=model, 
+                                provider=provider, 
+                                language=language, 
+                                api_key=api_key, 
+                                base_url=base_url, 
+                                http_client=http_client, 
+                                is_wav=False, 
+                                tracing_data=tracing_data)

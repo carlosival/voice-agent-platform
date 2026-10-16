@@ -38,3 +38,8 @@ openai>=1.0.0
 
 # Observability
 langfuse>=3.168.0
+openinference-instrumentation
+openinference-semantic-conventions 
+opentelemetry-api 
+opentelemetry-sdk 
+arize-otel

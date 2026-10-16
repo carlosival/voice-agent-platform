@@ -8,6 +8,7 @@ from workflows.steps.outputs.audio_output import IAudioOutput
 from workflows.signals import SignalFrame, WarmUp, AskUserStillThere, EndOfStream, StartSpeaking
 from .workers import get_tts_provider_worker
 from .utils import get_tts_provider_url
+from opentelemetry.trace import Span
 
 from workflows.utils import (
     layered_has_speech,

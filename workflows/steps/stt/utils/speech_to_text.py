@@ -1,4 +1,4 @@
-import os
+import os, logging
 import asyncio
 import io
 import wave
@@ -9,12 +9,37 @@ from typing import AsyncGenerator
 from av import AudioFrame
 from .helpers import pcm_to_wav, frames_to_pcm
 
+from openinference.semconv.trace import (
+    SpanAttributes,
+    AudioAttributes,
+    OpenInferenceSpanKindValues,
+    OpenInferenceMimeTypeValues,
+)
+
+from opentelemetry.trace import Status, StatusCode, set_span_in_context
+from opentelemetry.context import attach, detach, get_current
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
 STT_BASE_URL = os.getenv("STT_BASE_URL",  "http://speaches:8000")
 STT_MODEL    = os.getenv("STT_MODEL",     "Systran/faster-whisper-large-v3")
 STT_LANGUAGE = os.getenv("STT_LANGUAGE",  "es")
 STT_API_KEY  = os.getenv("STT_API_KEY")
 SAMPLE_RATE  = 48000
 
+WAV_MIME = "audio/wav"
+
+# Custom attributes have no semconv constant, so keep them in one place
+class STTAttributes:
+    LANGUAGE = "stt.language"
+    COST = "stt.cost"
+    MODEL ="stt.model"
+    PROVIDER = "stt.provider"
+    AUDIO_BYTES = "stt.audio.bytes"
+    AUDIO_DURATION_S = "stt.audio.duration_s"
+    TEXT_CHARS = "stt.text.chars"
+    HTTP_STATUS = "stt.http.status_code"
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -23,7 +48,7 @@ def pcm_to_wav(pcm_bytes: bytes, sample_rate: int = SAMPLE_RATE, channels: int =
     buf = io.BytesIO()
     with wave.open(buf, "wb") as wf:
         wf.setnchannels(channels)           # mono
-        wf.setsampwidth(sample_width)           # int16 = 2 bytes
+        wf.setsampwidth(sample_width)       # int16 = 2 bytes
         wf.setframerate(sample_rate)
         wf.writeframes(pcm_bytes)
     return buf.getvalue()
@@ -37,41 +62,87 @@ def frames_to_pcm(frames: list[np.ndarray]) -> bytes:
 
 # ─── STT Call — full buffer ───────────────────────────────────────────────────
 
-async def call_stt_openai(audio: bytes, model: str = STT_MODEL, language: str = STT_LANGUAGE, api_key: str = STT_API_KEY, base_url: str = STT_BASE_URL, http_client: AsyncClient = None, is_wav: bool = False) -> str:
+async def call_stt_openai(
+    audio: bytes, 
+    model: str = STT_MODEL, 
+    provider:str = "unknow",
+    language: str = STT_LANGUAGE, 
+    api_key: str = STT_API_KEY, 
+    base_url: str = STT_BASE_URL, 
+    http_client: AsyncClient = None, 
+    is_wav: bool = False,
+    tracing_data: dict = {}) -> str:
     """
     Transcribe audio bytes via Groq's OpenAI-compatible API.
     `audio` must be:
         PCM S16LE 16 kHz mono (bytes), unless `is_wav=True`.
     """
     
-    wav_bytes = audio if is_wav else pcm_to_wav(audio, sample_rate=16000)
+    tracer = tracing_data["tracer"]
+    parent_turn = tracing_data["parent_span"]
+    parent_ctx = set_span_in_context(parent_turn)
+    audio_url = None
+    
+    with tracer.start_as_current_span("stt.transcribe", context=parent_ctx) as span:
+        span.set_attribute(
+            SpanAttributes.OPENINFERENCE_SPAN_KIND,
+            OpenInferenceSpanKindValues.LLM.value,
+        )
+        span.set_attribute(STTAttributes.MODEL, model)
+        span.set_attribute(STTAttributes.PROVIDER, provider)
+        
+        span.set_attribute(SpanAttributes.INPUT_MIME_TYPE, WAV_MIME)
+        span.set_attribute(SpanAttributes.INPUT_VALUE, audio_url or f"{WAV_MIME} (not stored)")
 
-    # 1. Groq, OpenAI, Speaches, etc. requires an Authorization header with your API key
-    headers = {
-        "Authorization": f"Bearer {api_key}"
-    }
+        span.set_attribute(AudioAttributes.AUDIO_MIME_TYPE, WAV_MIME)
+        if audio_url:
+            span.set_attribute(AudioAttributes.AUDIO_URL, audio_url)
 
-    # 2. Adjusted URL pathing based on standard Groq/OpenAI structure
-    # If STT_BASE_URL is "https://api.groq.com/openai", use "/v1/audio/transcriptions"
-    url = f"{base_url}/v1/audio/transcriptions"
+        span.set_attribute(STTAttributes.LANGUAGE, language)
+        
 
-    resp = await http_client.post(
-        url,
-        headers=headers,  # ← Added headers
-        files={"file": ("audio.wav", wav_bytes, "audio/wav")},
-        data={
-            "model":    model,     # ← Make sure this is "whisper-large-v3-turbo"
-            "language": language,
-            "response_format": "json",
-            "temperature": "0",
-            # 3. REMOVED "no_speech_threshold". Groq does not support this parameter 
-            # and will throw an error if you pass it.
-        },
-        timeout=10.0, # Groq is very fast, but 10s gives a buffer for file uploads over WAN
-    )
-    resp.raise_for_status()
-    return resp.json()["text"].strip()
+        try:
+            wav_bytes = audio if is_wav else pcm_to_wav(audio, sample_rate=16000)
 
+            # 1. Groq, OpenAI, Speaches, etc. requires an Authorization header with your API key
+            headers = {
+                "Authorization": f"Bearer {api_key}"
+            }
+
+            # 2. Adjusted URL pathing based on standard Groq/OpenAI structure
+            # If STT_BASE_URL is "https://api.groq.com/openai", use "/v1/audio/transcriptions"
+            url = f"{base_url}/v1/audio/transcriptions"
+
+            resp = await http_client.post(
+                url,
+                headers=headers,  # ← Added headers
+                files={"file": ("audio.wav", wav_bytes, "audio/wav")},
+                data={
+                    "model":    model,     # ← Make sure this is "whisper-large-v3-turbo"
+                    "language": language,
+                    "response_format": "json",
+                    "temperature": "0",
+                    # 3. REMOVED "no_speech_threshold". Groq does not support this parameter 
+                    # and will throw an error if you pass it.
+                },
+                timeout=10.0, # Groq is very fast, but 10s gives a buffer for file uploads over WAN
+            )
+            resp.raise_for_status()
+            return resp.json()["text"].strip()
+
+            span.set_attribute(STTAttributes.AUDIO_BYTES, len(wav_bytes))
+            #span.set_attribute(STTAttributes.AUDIO_DURATION_S, round(pcm_len / 32000, 3))
+            span.set_attribute(SpanAttributes.OUTPUT_VALUE, text)
+            span.set_attribute(SpanAttributes.OUTPUT_MIME_TYPE, OpenInferenceMimeTypeValues.TEXT.value)
+            span.set_attribute(AudioAttributes.AUDIO_TRANSCRIPT, text)
+            span.set_attribute(STTAttributes.COST, 0)
+            span.set_attribute(STTAttributes.TEXT_CHARS, len(text))
+            span.set_status(Status(StatusCode.OK))
+        
+        except Exception as e:
+                span.record_exception(e)
+                span.set_status(Status(StatusCode.ERROR, str(e)))
+                raise
 
 async def call_stt_speaches(http_client: AsyncClient, audio: bytes, is_wav: bool = False) -> str:
     """

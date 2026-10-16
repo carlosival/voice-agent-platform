@@ -1,4 +1,5 @@
 from workflows import VOICE_WORKFLOW, track_frames
+from opentelemetry.trace import Status, StatusCode
 from yaafpy import ExecContext
 import logging
 import asyncio
@@ -14,6 +15,7 @@ async def audio_pipeline(input_track, ctx):
     """
 
     """ 
+    Fix This
     ExecContext:
         - session_id: Unique identifier for the session
         - metadata: Metadata for the session
@@ -26,24 +28,8 @@ async def audio_pipeline(input_track, ctx):
     source = track_frames(input_track)
     output_track = ctx.shared_data["resources"]["output_track"]
     logger.info("Pipeline starting")
-    trace_id = ctx.shared_data["trace_context"]["trace_id"]
     pc = ctx.shared_data["resources"]["pc"]
-    
-    # 1. Manually start the root observation — no context manager needed
-    session_trace = ctx.shared_data["resources"]["tracer"].start_observation(
-        name="voice_call_session",
-        trace_context={"trace_id": trace_id},
-        as_type="agent",
-        metadata={
-            "tools": list(ctx.shared_data["tools"].keys()),
-            "source": "webrtc",
-            "resources": list(ctx.shared_data["resources"].keys())
-        
-        }
-    )
-    
-    ctx.shared_data["trace_context"]["parent_span_id"] = session_trace.id
-
+    conversation_span = ctx.shared_data["trace_context"]["conversation_span"]
     final_closure_status = "completed_normally"
 
     try:
@@ -54,36 +40,31 @@ async def audio_pipeline(input_track, ctx):
     # can be add at runtime in ctx.shared_data["hooks"]["post_pipeline_hooks"]
     # TODO: Implement this
 
-    except asyncio.CancelledError:
+    except asyncio.CancelledError as e:
         logger.info("Pipeline cancelled (Normal shutdown or client disconnect)")
         final_closure_status = "client_disconnect_or_barge_in_shutdown"
         # Log the interruption info immediately to the trace instance
+
+        conversation_span.record_exception(e)
+        conversation_span.set_status(Status(StatusCode.OK, str(e)))
         
-        session_trace.update(
-            level="WARNING",
-            status_message="Pipeline execution loop was cancelled by the runtime engine."
-        )
-  
-    except httpx.ReadTimeout:
+        
+    except httpx.ReadTimeout as e:
         logger.error("Pipeline Error: External API timed out (STT/LLM/TTS).")
         # Optional: You could send a message to the UI here via the websocket
         final_closure_status = "api_timeout_failure"
         
-        session_trace.update(
-            level="ERROR",
-            status_message=f"Network Timeout Encountered: {str(e)}"
-        )
-        
+        conversation_span.record_exception(e)
+        conversation_span.set_status(Status(StatusCode.ERROR, f"Network Timeout Encountered: {str(e)}"))
+         
     except Exception as e:
         # This catches everything else to prevent the 'Task exception was never retrieved' error
         logger.error(f"Pipeline Critical Failure: {type(e).__name__} - {e}", exc_info=True)
         final_closure_status = "critical_pipeline_crash"
         
-        session_trace.update(
-            level="ERROR",
-            status_message=f"Pipeline crashed with uncaught error: {type(e).__name__} - {str(e)}"
-        )
-        
+        conversation_span.record_exception(e)
+        conversation_span.set_status(Status(StatusCode.ERROR, f"Pipeline crashed with uncaught error: {type(e).__name__} - {str(e)}"))
+    
     finally:
 
         # 1. Ensure the output track is cleared and resources are freed
@@ -109,18 +90,13 @@ async def audio_pipeline(input_track, ctx):
 
         # 4. Finalize the master root trace right before clearing memory allocations
         try:
+              
+            if final_closure_status == "completed_normally":
+                conversation_span.set_status(Status(StatusCode.OK))
             
-            session_trace.update(
-                output={
-                    "closure_reason": final_closure_status,
-                    "session_duration_seconds": time.time() - ctx.shared_data["peer_state"].get("connected_at", time.time())
-                },
-                # Pass your accumulated token usage counts back to the final metrics view
-                metadata=ctx.shared_data.get("metadata", {})
-            )
-            session_trace.end()
-            ctx.shared_data["resources"]["tracer"].flush()
+            conversation_span.end()
+            ctx.shared_data["resources"]["tracer_provider"].force_flush(timeout_millis=10_000)
         except Exception as trace_end_err:
-            logger.error(f"Failed to cleanly commit final Langfuse trace state: {trace_end_err}")
+            logger.error(f"Failed to cleanly commit final Observability trace state: {trace_end_err}")
 
     logger.info("Pipeline finished")

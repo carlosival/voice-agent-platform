@@ -4,9 +4,11 @@ from workflows.steps.stt.workers import get_stt_provider, get_stt_provider_url
 from yaafpy.types import ExecContext
 from typing import AsyncGenerator
 from workflows.signals import EndOfStream, AskUserStillThere, StartSpeaking, WarmUp 
-import asyncio
+from opentelemetry.trace import Span
 
-import logging 
+import asyncio, logging
+
+
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -34,6 +36,10 @@ async def stt_stream(
     """
     tasks = []
     
+    conversation_span = ctx.shared_data["trace_context"]["conversation_span"]
+    turn_trace = None
+    tracer = ctx.shared_data["resources"]["tracer"]
+
     http_client: httpx.AsyncClient = ctx.shared_data["resources"]["http_client"]
     stt_provider_name = ctx.shared_data["stt_config"]["engine"]
     logger.info(f"stt_provider_name:{stt_provider_name}")
@@ -46,6 +52,11 @@ async def stt_stream(
     current_task = None
 
     async for item in source:
+
+        if isinstance(item, Span):
+            turn_trace = item
+            yield item
+            continue
 
         if isinstance(item, EndOfStream):
             cancel_all_tasks(tasks)
@@ -75,7 +86,15 @@ async def stt_stream(
 
             # Launch STT provider like Whisper as a task so we can cancel it if a StopAndClear arrives later
             # Refactor: Pass at runtime the provider provider url, api, model,language, etc
-            stt_task = asyncio.create_task((get_stt_provider(stt_provider_name))(item, model=stt_model, language=stt_language, api_key=stt_api_key, base_url=stt_base_url, http_client=http_client))
+            stt_task = asyncio.create_task((get_stt_provider(stt_provider_name))(
+                item, 
+                model=stt_model, 
+                language=stt_language, 
+                api_key=stt_api_key, 
+                base_url=stt_base_url, 
+                http_client=http_client,
+                tracing_data={"tracer": tracer,"parent_span": turn_trace}
+                ))
             tasks.append(stt_task)
 
             try:
