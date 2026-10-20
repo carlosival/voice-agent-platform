@@ -61,6 +61,8 @@ async def call_stt( frames: list[AudioFrame],
     # Convert to:
     # int16 / mono / 16 kHz
     pcm_s16le_bytes = frames_to_pcm_s16le(frames)
+
+   
     return await call_stt_openai(audio=pcm_s16le_bytes, 
                                 model=model, 
                                 provider=provider, 
@@ -68,5 +70,4 @@ async def call_stt( frames: list[AudioFrame],
                                 api_key=api_key, 
                                 base_url=base_url, 
                                 http_client=http_client, 
-                                is_wav=False, 
                                 tracing_data=tracing_data)

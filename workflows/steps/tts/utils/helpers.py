@@ -9,6 +9,7 @@ def build_payload(
 ) -> dict[str, Any]:
 
     payload = {
+        "provider": provider,
         "model": model,
         "input": text,
         "voice": voice,

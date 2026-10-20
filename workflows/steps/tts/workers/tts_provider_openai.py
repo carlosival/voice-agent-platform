@@ -20,7 +20,8 @@ async def tts_worker(
                     voice:str,
                     language:str,
                     api_key:str,
-                    base_url:str
+                    base_url:str,
+                    tracing_data:dict
                     ):
         
         converter = AudioConverter(
@@ -46,7 +47,7 @@ async def tts_worker(
                 payload = build_payload(provider_name, text, model, voice)  
                 
                 
-                async for chunk_bytes in call_tts_stream(text=text, payload=payload,api_key=api_key, base_url=base_url,http_client=http_client):
+                async for chunk_bytes in call_tts_stream(text=text, payload=payload,api_key=api_key, base_url=base_url,http_client=http_client,tracing_data=tracing_data):
                     # I don't really need to convert the bytes to an AudioFrame
                     # I can just add the bytes directly to the output track
                     # But I need to make sure the format is correct

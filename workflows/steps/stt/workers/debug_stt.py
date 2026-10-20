@@ -2,7 +2,6 @@ import os, uuid, wave
 import numpy as np
 from pathlib import Path
 
-from workflows.utils import frames_to_mono_int16
 from av import AudioFrame
 
 import logging 
@@ -17,6 +16,20 @@ WORKER_DIR = Path(__file__).resolve().parent
 # workflows/steps/stt/workers/stt_debug/
 DEBUG_DIR = WORKER_DIR / "stt_debug"
 
+
+
+
+def save_pcm_s16le_wav(
+    pcm16_bytes: bytes,
+    path: str,
+    sample_rate: int = 16000,
+    channels: int = 1,
+) -> None:
+    with wave.open(path, "wb") as wf:
+        wf.setnchannels(channels)
+        wf.setsampwidth(2)          # PCM16 2bytes per sample
+        wf.setframerate(sample_rate)
+        wf.writeframes(pcm16_bytes)
 
 
 async def debug_stt(frames: list[AudioFrame]) -> str:

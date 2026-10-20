@@ -44,6 +44,12 @@ async def tts_stream(
     """
 
     tasks= []
+
+
+    conversation_span = ctx.shared_data["trace_context"]["conversation_span"]
+    turn_trace = None
+    tracer = ctx.shared_data["resources"]["tracer"]
+
     http_client:    httpx.AsyncClient   = ctx.shared_data["resources"]["http_client"]
     output_track = ctx.shared_data["resources"]["output_track"]
     tts_provider_name = ctx.shared_data["tts_config"]["engine"]
@@ -66,10 +72,16 @@ async def tts_stream(
             voice=tts_voice,
             language=tts_language,
             api_key=tts_api_key,
-            base_url=tts_base_url))
+            base_url=tts_base_url,
+            tracing_data={"tracer": tracer,"parent_span": turn_trace}
+            ))
 
     try:
         async for sentence in source:
+            if isinstance(sentence, Span):
+                turn_trace = sentence
+                continue
+            
             if isinstance(sentence, WarmUp):
                 logger.info(f"TTS received WarmUp signal.")
                 await output_track.add_silence(duration_frames=50)
@@ -106,7 +118,9 @@ async def tts_stream(
                                                         voice=tts_voice,
                                                         language=tts_language,
                                                         api_key=tts_api_key,
-                                                        base_url=tts_base_url))
+                                                        base_url=tts_base_url,
+                                                        tracing_data={"tracer": tracer,"parent_span": turn_trace}
+                                                        ))
                 continue
 
             # 2. DATA HANDLING (The Sentence)

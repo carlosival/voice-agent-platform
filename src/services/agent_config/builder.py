@@ -200,7 +200,7 @@ def build_agent_config(assoc) -> dict[str, Any]:
             "output_schema": copy.deepcopy(pv.output_schema),
         },
         "input": input_values,
-        "state": {"fields": fields},
+        "state": {"id": str(state.id),"fields": fields},
         "tools": tools,
         "custom": custom,
     }

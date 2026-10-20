@@ -7,10 +7,11 @@ from av import AudioFrame
 from typing import AsyncGenerator
 from enum import Enum
 from collections import deque
-import logging, uuid
+import logging, uuid, time
 import numpy as np
 
 from opentelemetry.trace import Status, StatusCode, set_span_in_context
+from opentelemetry import baggage
 
 from .config import (
     PRE_ROLL_LEN, MAX_UTTERANCE_LEN, SILERO_ACCUM,
@@ -36,7 +37,7 @@ async def vad_gate(source: AsyncGenerator, ctx: ExecContext) -> AsyncGenerator[l
 
     conversation_span = ctx.shared_data["trace_context"]["conversation_span"]
     tracer = ctx.shared_data["resources"]["tracer"]
-    session_id = ctx.shared_data["session_id"]
+    session_id = str(ctx.shared_data["session_id"])
 
     state          = VADState.QUIET
     starting_count = 0
@@ -45,6 +46,7 @@ async def vad_gate(source: AsyncGenerator, ctx: ExecContext) -> AsyncGenerator[l
     silero_buf     = []      # accumulates SILERO_ACCUM frames before VAD call
     consecutive_silence_counter = 0
     ask_user = 0
+    turn_count = 0
     end_speech_check = False
     current_turn = None
     # This holds audio history during silent periods
@@ -128,22 +130,7 @@ async def vad_gate(source: AsyncGenerator, ctx: ExecContext) -> AsyncGenerator[l
                                 state = VADState.SPEAKING
                                 consecutive_silence_counter = 0
                                 ask_user = 0
-                                # SIGNAL 0: Signal new Turn start and stop old turn if there is one
-                                if current_turn:
-                                    current_turn.set_status(Status(StatusCode.OK))
-                                    current_turn.end()
                                 
-                                turn_context = set_span_in_context(conversation_span)
-
-                                current_turn = tracer.start_span(
-                                                "turn",
-                                                context=turn_context,
-                                                attributes={
-                                                    "session.id": session_id,
-                                                    "turn.id": str(uuid.uuid4()),
-                                                },
-                                            )
-                                yield current_turn
                                 # SIGNAL 1: Signal other process to Stop the workers
                                 yield StartSpeaking()
                                 
@@ -173,6 +160,7 @@ async def vad_gate(source: AsyncGenerator, ctx: ExecContext) -> AsyncGenerator[l
                             state          = VADState.STOPPING
                             stopping_count = SILERO_ACCUM
                         case VADState.STOPPING:
+                            
                             stopping_count += SILERO_ACCUM
                             
                             try:
@@ -186,6 +174,34 @@ async def vad_gate(source: AsyncGenerator, ctx: ExecContext) -> AsyncGenerator[l
                                         logger.info(f"TURN: Endpoint detected (prob: {probability:.2f}). Ending Speaking Turn Start.")
                                         state          = VADState.QUIET
                                         # SIGNAL 3: User is done speaking by model prediction.
+
+                                        # SIGNAL 0: Signal new Turn start and stop old turn if there is one
+                                        if current_turn:
+                                            current_turn.set_status(Status(StatusCode.OK))
+                                            current_turn.end()
+                                        
+                                        turn_count+=1
+                                        
+                                        turn_context = set_span_in_context(conversation_span)
+
+                                        turn_context = baggage.set_baggage(
+                                            "turn_sequence",
+                                            turn_count,
+                                            context=turn_context,
+                                        )
+                                        
+                                        current_turn = tracer.start_span(
+                                                        f"turn.{turn_count}",
+                                                        context=turn_context,
+                                                        attributes={
+                                                            "session.id": session_id,
+                                                            "turn.id": str(uuid.uuid4()),
+                                                            "turn.seq": turn_count,
+                                                        },
+                                                    )
+                                        yield current_turn
+
+
                                         yield EndSpeaking()
                                         # 4. NOW send the data
                                         yield utterance_buf
@@ -201,6 +217,33 @@ async def vad_gate(source: AsyncGenerator, ctx: ExecContext) -> AsyncGenerator[l
                                 logger.info(f"VAD: → {len(utterance_buf)} frames ({len(utterance_buf)*20}ms)")
                                 state          = VADState.QUIET
                                 # SIGNAL 3: User is done speaking by silence time.
+
+                                # SIGNAL 0: Signal new Turn start and stop old turn if there is one
+                                if current_turn:
+                                    current_turn.set_status(Status(StatusCode.OK))
+                                    current_turn.end()
+                                
+                                turn_count+=1
+                                
+                                turn_context = set_span_in_context(conversation_span)
+
+                                turn_context = baggage.set_baggage(
+                                    "turn_sequence",
+                                    turn_count,
+                                    context=turn_context,
+                                )
+                                
+                                current_turn = tracer.start_span(
+                                                f"turn.{turn_count}",
+                                                context=turn_context,
+                                                attributes={
+                                                    "session.id": session_id,
+                                                    "turn.id": str(uuid.uuid4()),
+                                                    "turn.seq": turn_count,
+                                                },
+                                            )
+                                yield current_turn
+
                                 yield EndSpeaking()
                                 # 4. NOW send the data
                                 yield utterance_buf

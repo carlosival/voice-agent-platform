@@ -105,7 +105,7 @@ def save_wav(pcm: np.ndarray, sample_rate: int, path: str) -> None:
     logger.info(f"WAV saved: {path} ({len(wav_bytes)} bytes, {sample_rate}Hz)")
 
 
-def pcm_to_wav(pcm_bytes: bytes, sample_rate: int = SAMPLE_RATE, save_path: bool = True) -> bytes:
+def pcm_to_wav_save(pcm_bytes: bytes, sample_rate: int = SAMPLE_RATE, save_path: bool = True) -> bytes:
     """Wrap raw PCM int16 bytes in a WAV container — Whisper needs a file format."""
     buf = io.BytesIO()
     with wave.open(buf, "wb") as wf:
@@ -119,6 +119,33 @@ def pcm_to_wav(pcm_bytes: bytes, sample_rate: int = SAMPLE_RATE, save_path: bool
             f.write(buf.getvalue())
     return buf.getvalue()
 
+def pcm_to_wav(pcm_bytes: bytes, sample_rate: int = SAMPLE_RATE, channels: int = 1, sample_width = 2) -> bytes:
+    """Wrap raw PCM int16 bytes in a WAV container — Whisper needs a file format."""
+    buf = io.BytesIO()
+    with wave.open(buf, "wb") as wf:
+        wf.setnchannels(channels)           # mono
+        wf.setsampwidth(sample_width)       # int16 = 2 bytes
+        wf.setframerate(sample_rate)
+        wf.writeframes(pcm_bytes)
+    return buf.getvalue()
+
+
+def frames_to_pcm(frames: list[np.ndarray]) -> bytes:
+    """Concatenate aiortc AudioFrames into raw PCM bytes."""
+    arrays = [np.array(f.to_ndarray(), dtype=np.int16).flatten() for f in frames]
+    return np.concatenate(arrays).tobytes()
+
+def save_pcm_s16le_wav(
+    pcm16_bytes: bytes,
+    path: str,
+    sample_rate: int = 16000,
+    channels: int = 1,
+) -> None:
+    with wave.open(path, "wb") as wf:
+        wf.setnchannels(channels)
+        wf.setsampwidth(2)          # PCM16 2bytes per sample
+        wf.setframerate(sample_rate)
+        wf.writeframes(pcm16_bytes)
 
 def save_debug_wav(path: str, data: bytes, sample_rate: int):
     """Synchronous file writing logic to be run in a thread or background."""
@@ -132,6 +159,14 @@ def save_debug_wav(path: str, data: bytes, sample_rate: int):
     except Exception as e:
         logger.error(f"Failed to save TTS debug file: {e}")
 
+def float32_to_pcm16(audio: np.ndarray) -> bytes:
+    audio = np.asarray(audio, dtype=np.float32).reshape(-1)
+
+    # Safety: clip before integer conversion
+    audio = np.clip(audio, -1.0, 1.0)
+
+    pcm16 = (audio * 32767.0).astype("<i2")  # little-endian int16
+    return pcm16.tobytes()
 
 # ════════════════════════════════════════════════════════════
 # VALID USER INPUT

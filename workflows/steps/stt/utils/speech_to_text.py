@@ -1,13 +1,11 @@
-import os, logging
-import asyncio
-import io
-import wave
+import os, logging, time, uuid, asyncio, io, wave, httpx
 import numpy as np
-import httpx
 from httpx import AsyncClient
 from typing import AsyncGenerator
 from av import AudioFrame
-from .helpers import pcm_to_wav, frames_to_pcm
+from .helpers import pcm_to_wav, frames_to_pcm, save_pcm_s16le_wav
+from pathlib import Path
+
 
 from openinference.semconv.trace import (
     SpanAttributes,
@@ -26,12 +24,14 @@ STT_BASE_URL = os.getenv("STT_BASE_URL",  "http://speaches:8000")
 STT_MODEL    = os.getenv("STT_MODEL",     "Systran/faster-whisper-large-v3")
 STT_LANGUAGE = os.getenv("STT_LANGUAGE",  "es")
 STT_API_KEY  = os.getenv("STT_API_KEY")
+STORAGE_PATH = Path(os.getenv("AUDIO_STORAGE_PATH"))
 SAMPLE_RATE  = 48000
 
 WAV_MIME = "audio/wav"
 
 # Custom attributes have no semconv constant, so keep them in one place
 class STTAttributes:
+    KIND =  "stt"
     LANGUAGE = "stt.language"
     COST = "stt.cost"
     MODEL ="stt.model"
@@ -40,24 +40,8 @@ class STTAttributes:
     AUDIO_DURATION_S = "stt.audio.duration_s"
     TEXT_CHARS = "stt.text.chars"
     HTTP_STATUS = "stt.http.status_code"
-
-# ─── Helpers ──────────────────────────────────────────────────────────────────
-
-def pcm_to_wav(pcm_bytes: bytes, sample_rate: int = SAMPLE_RATE, channels: int = 1, sample_width = 2) -> bytes:
-    """Wrap raw PCM int16 bytes in a WAV container — Whisper needs a file format."""
-    buf = io.BytesIO()
-    with wave.open(buf, "wb") as wf:
-        wf.setnchannels(channels)           # mono
-        wf.setsampwidth(sample_width)       # int16 = 2 bytes
-        wf.setframerate(sample_rate)
-        wf.writeframes(pcm_bytes)
-    return buf.getvalue()
-
-
-def frames_to_pcm(frames: list[np.ndarray]) -> bytes:
-    """Concatenate aiortc AudioFrames into raw PCM bytes."""
-    arrays = [np.array(f.to_ndarray(), dtype=np.int16).flatten() for f in frames]
-    return np.concatenate(arrays).tobytes()
+    HTTP_LATENCY_MS = "stt.http.latency.ms"
+    PROVIDER_REAL_TIME_FACTOR = "stt.rtf"
 
 
 # ─── STT Call — full buffer ───────────────────────────────────────────────────
@@ -70,7 +54,6 @@ async def call_stt_openai(
     api_key: str = STT_API_KEY, 
     base_url: str = STT_BASE_URL, 
     http_client: AsyncClient = None, 
-    is_wav: bool = False,
     tracing_data: dict = {}) -> str:
     """
     Transcribe audio bytes via Groq's OpenAI-compatible API.
@@ -81,28 +64,39 @@ async def call_stt_openai(
     tracer = tracing_data["tracer"]
     parent_turn = tracing_data["parent_span"]
     parent_ctx = set_span_in_context(parent_turn)
-    audio_url = None
+    
+    key = uuid.uuid4()
+    # Path /audio/uuid_key.wav inside docker container
+    path = STORAGE_PATH / f"{str(key)}.wav"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    
+    # Save audio input to disk without blocking the event loop
+    await asyncio.to_thread(
+        save_pcm_s16le_wav,
+        audio,
+        str(path),
+    )
     
     with tracer.start_as_current_span("stt.transcribe", context=parent_ctx) as span:
         span.set_attribute(
             SpanAttributes.OPENINFERENCE_SPAN_KIND,
-            OpenInferenceSpanKindValues.LLM.value,
+            OpenInferenceSpanKindValues.CHAIN.value,
         )
+
+        span.set_attribute(SpanAttributes.INPUT_VALUE, path)
+        span.set_attribute(SpanAttributes.INPUT_MIME_TYPE, WAV_MIME)
+        
         span.set_attribute(STTAttributes.MODEL, model)
         span.set_attribute(STTAttributes.PROVIDER, provider)
         
-        span.set_attribute(SpanAttributes.INPUT_MIME_TYPE, WAV_MIME)
-        span.set_attribute(SpanAttributes.INPUT_VALUE, audio_url or f"{WAV_MIME} (not stored)")
-
         span.set_attribute(AudioAttributes.AUDIO_MIME_TYPE, WAV_MIME)
-        if audio_url:
-            span.set_attribute(AudioAttributes.AUDIO_URL, audio_url)
+        span.set_attribute(AudioAttributes.AUDIO_URL, key)
 
         span.set_attribute(STTAttributes.LANGUAGE, language)
         
 
         try:
-            wav_bytes = audio if is_wav else pcm_to_wav(audio, sample_rate=16000)
+            wav_bytes = pcm_to_wav(audio, sample_rate=16000)
 
             # 1. Groq, OpenAI, Speaches, etc. requires an Authorization header with your API key
             headers = {
@@ -113,6 +107,7 @@ async def call_stt_openai(
             # If STT_BASE_URL is "https://api.groq.com/openai", use "/v1/audio/transcriptions"
             url = f"{base_url}/v1/audio/transcriptions"
 
+            start = time.perf_counter()
             resp = await http_client.post(
                 url,
                 headers=headers,  # ← Added headers
@@ -127,17 +122,23 @@ async def call_stt_openai(
                 },
                 timeout=10.0, # Groq is very fast, but 10s gives a buffer for file uploads over WAN
             )
+            request_latency_ms = (time.perf_counter() - start) * 1000
             resp.raise_for_status()
-            return resp.json()["text"].strip()
-
+            text = resp.json()["text"].strip()
+            audio_duration = len(audio) / (16000 * 1 * 2)
+            span.set_attribute(STTAttributes.HTTP_LATENCY_MS, request_latency_ms)
+            span.set_attribute(STTAttributes.HTTP_STATUS, resp.status_code)
             span.set_attribute(STTAttributes.AUDIO_BYTES, len(wav_bytes))
-            #span.set_attribute(STTAttributes.AUDIO_DURATION_S, round(pcm_len / 32000, 3))
+            span.set_attribute(STTAttributes.AUDIO_DURATION_S, audio_duration)
+            span.set_attribute(STTAttributes.PROVIDER_REAL_TIME_FACTOR, round((request_latency_ms/audio_duration),3))
             span.set_attribute(SpanAttributes.OUTPUT_VALUE, text)
             span.set_attribute(SpanAttributes.OUTPUT_MIME_TYPE, OpenInferenceMimeTypeValues.TEXT.value)
             span.set_attribute(AudioAttributes.AUDIO_TRANSCRIPT, text)
             span.set_attribute(STTAttributes.COST, 0)
             span.set_attribute(STTAttributes.TEXT_CHARS, len(text))
             span.set_status(Status(StatusCode.OK))
+
+            return text
         
         except Exception as e:
                 span.record_exception(e)

@@ -11,7 +11,12 @@ from aiortc import RTCPeerConnection, RTCIceCandidate
 from aiortc.sdp import candidate_to_sdp
 
 from opentelemetry import trace
-
+from openinference.semconv.trace import (
+    SpanAttributes,
+    AudioAttributes,
+    OpenInferenceSpanKindValues,
+    OpenInferenceMimeTypeValues,
+)
 
 
 import logging, json, time, asyncio, re, copy
@@ -73,18 +78,27 @@ class DepProvider:
 
         logger.info(f"Agent config: {agent_config}")
 
-        pk_id = agent_config["meta"]["pk_id"]
+        pk_id = str(agent_config.get("meta", {}).get("pk_id", ""))
 
         # 1. Start the root conversation span
         conversation_span = tracer.start_span(
-            "conversation",
+            "voice_conversational_agent",
             attributes={
-                "session.id": session_id,
-                "agent.id": str(agent_config.get("meta", {}).get("pk_id", "")),
+                f"{SpanAttributes.SESSION_ID}": session_id,
+                "agent_id": str(agent_config.get("meta", {}).get("agent_id", "")),
+                f"{SpanAttributes.PROMPT_ID}": str(agent_config.get("prompt", {}).get("id", "")),
+                "state": str(agent_config.get("state", {}).get("id", "")), 
+                "tools": ",".join([tool["id"] for tool in agent_config.get("tools",{}).values()]),
+                f"{SpanAttributes.OPENINFERENCE_SPAN_KIND}": str(agent_config.get("meta", {}).get("strategy", "")),
+                f"{SpanAttributes.AGENT_NAME}": str(agent_config.get("meta", {}).get("name", "")),
+                f"{SpanAttributes.USER_ID}": str(agent_config.get("meta", {}).get("pk_id", "")),
+                
                 # Refactor Add other related attr that allows to track back state, prompt version, tools, etc
-                # How this agent was construct
+                # How this agent was build from config
             },
         )
+
+        
 
         # 2. Load Tools
         tools_registry = {}

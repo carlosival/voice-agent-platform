@@ -174,11 +174,8 @@ async def call_llm_stream_openai(
                 tool_calls = getattr(delta, "tool_calls", None) or []
 
                 if token:
-                    if ttft_ms is None:
-                        ttft_ms = (time.perf_counter() - t0) * 1000
-                        span.add_event(LLMStreamAttributes.TTFT_MS)
-                    accumulated_text += token
-                    
+                
+                    accumulated_text += token    
                     yield {"event": "token", "data": token}
 
                 for tc in tool_calls:

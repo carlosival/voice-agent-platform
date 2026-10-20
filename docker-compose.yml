@@ -9,6 +9,7 @@ volumes:
   ollama_data:       # Persists Ollama downloaded models
   postgres_data:     # Persists PostgreSQL data
   redis_data:        # Persists Redis data
+  audio_data:        # Storage audio Files 
 
 networks:
   ai-net:
@@ -291,6 +292,8 @@ services:
       context: .
       dockerfile: worker/Dockerfile
     image: voice-worker:latest
+    volumes:
+      - audio_data:/audio
     container_name: worker-1
     restart: unless-stopped
     networks:
@@ -352,6 +355,9 @@ services:
       VAULT_PROJECT_ID: ${VAULT_PROJECT_ID}
       VAULT_MACHINE_IDENTITY_CLIENT_ID: ${VAULT_MACHINE_IDENTITY_CLIENT_ID}
       VAULT_MACHINE_IDENTITY_CLIENT_SECRET: ${VAULT_MACHINE_IDENTITY_CLIENT_SECRET}
+
+      # AUDIO STORAGE 
+      AUDIO_STORAGE_PATH: /audio
 
 
     depends_on:

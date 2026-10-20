@@ -73,17 +73,12 @@ async def stt_stream(
             yield item
 
         if isinstance(item, WarmUp):
-            # We know audio is coming, but we ignore until UserFinished
+
             yield item
 
         if isinstance(item, list): # This is the actual AudioBuffer
             
-            if DEBUG:
-               asyncio.create_task(debug_stt(item))
             
-            if SAVE_TO_S3:
-                asyncio.create_task(save_s3(item))
-
             # Launch STT provider like Whisper as a task so we can cancel it if a StopAndClear arrives later
             # Refactor: Pass at runtime the provider provider url, api, model,language, etc
             stt_task = asyncio.create_task((get_stt_provider(stt_provider_name))(
