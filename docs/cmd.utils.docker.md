@@ -16,6 +16,7 @@ docker exec -it fastapi bash
 docker compose build --no-cache
 docker compose up -d
 docker compose build --no-cache && docker compose up -d
+docker compose up -d --build --force-recreate --no-deps worker-1
 
 # Stop a project
 docker compose down

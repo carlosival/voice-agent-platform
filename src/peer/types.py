@@ -41,7 +41,7 @@ class PeerSession:
         self.ctx = ctx
 
     def cancel_all_tasks(self):
-        for task in tasks:
+        for task in self.tasks:
             if not task.done():
                 task.cancel()
         

@@ -68,6 +68,7 @@ async def call_llm_stream_openai_worker(
     llm_config: Optional[dict] = {},
     queue: asyncio.Queue = None
     ):
+        
         sentence_queue = queue
         buffer = ""
 
@@ -235,14 +236,15 @@ async def call_llm_stream_openai_worker(
 
                         # Could be sequential or parallel, as needed
                         # Parallel execution via asyncio.gather if async tools
-                        results = await asyncio.gather(*[execute_tool(tc, tools) for tc in mapped_calls])
+                        results = await asyncio.gather(*[execute_tool(tc, tools, tracing_data=tracing_data) for tc in mapped_calls])
                         logger.info(f"[llm_stream] Tool call results: {results}")
 
+                        
                         if EndOfStream in [type(r.get("result", None)) for r in results]:
                             logger.info("[llm_stream] EndOfStream from tool result. Finishing conversation.")
                             sentence_queue.put_nowait(EndOfStream())
                             break
-
+                                   
                         zip_tc_results = zip(mapped_calls, results, strict=True)
                         sentence_queue.put_nowait(list(zip_tc_results))
 
@@ -257,7 +259,7 @@ async def call_llm_stream_openai_worker(
                             if result is not None:
                                 if isinstance(result, str):
                                     sentence_queue.put_nowait(result)
-                                if isinstance(result, EOStream):
+                                if isinstance(result, EndOfStream):
                                     sentence_queue.clear()
                                     sentence_queue.put_nowait(result)
                                     break
@@ -274,6 +276,6 @@ async def call_llm_stream_openai_worker(
             logger.info("[llm_stream] Cancelled by signal.")
             sentence_queue.put_nowait(cancel_error)
         except Exception as e:
-            logger.error(f"[llm_stream] Unexpected error in worker: {e}")
+            logger.error(f"[llm_stream] Unexpected error in worker: {e}", exc_info=1)
             sentence_queue.put_nowait(e)
         

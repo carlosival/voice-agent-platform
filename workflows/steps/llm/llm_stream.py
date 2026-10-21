@@ -2,9 +2,17 @@ from typing import Dict, AsyncGenerator
 from .workers import call_llm_stream_openai_worker, get_llm_provider_worker, get_provider_url
 from workflows.signals import SignalFrame, WarmUp, AskUserStillThere, EndOfStream, StartSpeaking
 from workflows.utils.tools import Tool
-from opentelemetry.trace import Span
+from opentelemetry.trace import Span, Status, StatusCode, set_span_in_context
 from yaafpy.types import ExecContext
 import logging, asyncio
+
+
+from openinference.semconv.trace import (
+    SpanAttributes,
+    AudioAttributes,
+    OpenInferenceSpanKindValues,
+    OpenInferenceMimeTypeValues,
+)
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -70,120 +78,129 @@ async def llm_stream(
                 full_response = ""
                 tool_calls = []
                 
-                # The extra function to call for a llm provider bring flexibility at runtime
-                # It allows to add new providers it one is down 
-                current_task = asyncio.create_task(get_llm_provider_worker(provider_name, model)(
-                                            text=item,
-                                            memory=message_history, 
-                                            tools=tools, 
-                                            http_client=http_client,
-                                            tracing_data={"tracer": tracer, "parent_span": turn_trace},
-                                            model=model,
-                                            system_prompt=system_prompt,
-                                            provider_url=provider_url,
-                                            api_key=api_key,
-                                            llm_config=llm_config,
-                                            queue=sentence_queue,
-                                            ))
                 
-                # Consume from queue until None or Interrupted
-                while True:
-                    try:
-                        # 1. WAIT WITH TIMEOUT
-                        # If LLM doesn't yield a sentence in 5s, send a placeholder
-                        item_from_queue = await asyncio.wait_for(
-                            sentence_queue.get(), 
-                            timeout=timeout_curr
-                        )
+                parent_ctx = set_span_in_context(turn_trace)
+                
+                with tracer.start_as_current_span("llm.tool_loop", context=parent_ctx) as span:
+                    span.set_attribute(SpanAttributes.INPUT_VALUE, item)
+                    # The extra function to call for a llm provider bring flexibility at runtime
+                    # It allows to add new providers it one is down 
+                    current_task = asyncio.create_task(get_llm_provider_worker(provider_name, model)(
+                                                text=item,
+                                                memory=message_history, 
+                                                tools=tools, 
+                                                http_client=http_client,
+                                                tracing_data={"tracer": tracer, "parent_span": span},
+                                                model=model,
+                                                system_prompt=system_prompt,
+                                                provider_url=provider_url,
+                                                api_key=api_key,
+                                                llm_config=llm_config,
+                                                queue=sentence_queue,
+                                                ))
+                    
+                    # Consume from queue until None or Interrupted
+                    while True:
+                        try:
+                            # 1. WAIT WITH TIMEOUT
+                            # If LLM doesn't yield a sentence in 5s, send a placeholder
+                            item_from_queue = await asyncio.wait_for(
+                                sentence_queue.get(), 
+                                timeout=timeout_curr
+                            )
 
 
-                        if isinstance(item_from_queue, list): # List of ToolCallChunk and results
-                            
-                            for tool_chunk, result in item_from_queue:
-                                logger.info(f"[llm_stream] Tool call result: {tool_chunk.name} -> {result}")
-
-                            # Call LLM again with tool results included
-                            if current_task and not current_task.done():
-                                current_task.cancel()
-                                await asyncio.gather(current_task, return_exceptions=True)
+                            if isinstance(item_from_queue, list): # List of ToolCallChunk and results
                                 
-                                # I think is not need to clean the queue here, should be clean
-                                logger.info(f"[llm_stream_sentence_queue] is empty: {sentence_queue.empty()}")
-                            
-                            # The extra function to call for a llm provider bring flexibility at runtime
-                            # It allows to add new providers it one is down or not available  
-                            current_task = asyncio.create_task(get_llm_provider_worker(provider_name, model)(
-                                            text=item,
-                                            memory=message_history, 
-                                            tools=tools, 
-                                            http_client=http_client,
-                                            tracing_data={"tracer": tracer, "trace_id": trace_id, "parent_span_id": parent_span_id},
-                                            model=model,
-                                            system_prompt=system_prompt,
-                                            provider_url=provider_url,
-                                            api_key=api_key,
-                                            llm_config=llm_config,
-                                            queue=sentence_queue,
-                                            ))
-                            continue
-                    
+                                for tool_chunk, result in item_from_queue:
+                                    logger.info(f"[llm_stream] Tool call result: {tool_chunk.name} -> {result}")
 
-                        # 2. HANDLE RESULTS
-                        if item_from_queue is None: # Normal finish
-                            await message_history.add_user_message(item)
-                            await message_history.add_ai_message(full_response, None) 
-                            break
+                                # Call LLM again with tool results included
+                                if current_task and not current_task.done():
+                                    current_task.cancel()
+                                    await asyncio.gather(current_task, return_exceptions=True)
+                                    
+                                    # I think is not need to clean the queue here, should be clean
+                                    logger.info(f"[llm_stream_sentence_queue] is empty: {sentence_queue.empty()}")
+                                
+                                # The extra function to call for a llm provider bring flexibility at runtime
+                                # It allows to add new providers it one is down or not available  
+                                current_task = asyncio.create_task(get_llm_provider_worker(provider_name, model)(
+                                                text=item,
+                                                memory=message_history, 
+                                                tools=tools, 
+                                                http_client=http_client,
+                                                tracing_data={"tracer": tracer, "parent_span": span},
+                                                model=model,
+                                                system_prompt=system_prompt,
+                                                provider_url=provider_url,
+                                                api_key=api_key,
+                                                llm_config=llm_config,
+                                                queue=sentence_queue,
+                                                ))
+                                continue
                         
-                        if isinstance(item_from_queue, EndOfStream):
-                            logger.info("[llm_stream] EndOfStream from LLM worker. Finishing conversation.")
-                            # Good bye message
-                            yield "Hasta luego"
-                            await message_history.add_user_message(item)
-                            await message_history.add_ai_message("Hasta luego", None)
-                            await asyncio.sleep(0.8) # Wait for the TTS to finish and send EndOfStream
-                            yield EndOfStream()
-                            break
-                            
 
-                        if isinstance(item_from_queue, Exception):
-                            logger.info(f"LLM: Exception in worker: {item_from_queue}")
-                            yield "Lo siento, tuve un problema técnico al procesar su pregunta."
-                            break
-                        
-                        if isinstance(item_from_queue, asyncio.CancelledError):
+                            # 2. HANDLE RESULTS
+                            if item_from_queue is None: # Normal finish
+                                await message_history.add_user_message(item)
+                                await message_history.add_ai_message(full_response, None) 
+                                span.set_attribute(SpanAttributes.OUTPUT_VALUE, full_response)
+                                # Add output value to the span with status ok
+                                break
+                            
+                            if isinstance(item_from_queue, EndOfStream):
+                                logger.info("[llm_stream] EndOfStream from LLM worker. Finishing conversation.")
+                                # Good bye message
+                                yield "Hasta luego"
+                                await message_history.add_user_message(item)
+                                await message_history.add_ai_message("Hasta luego", None)
+                                await asyncio.sleep(0.8) # Wait for the TTS to finish and send EndOfStream
+                                span.set_attribute(SpanAttributes.OUTPUT_VALUE, full_response)
+                                yield EndOfStream()
+                                break
+                                
+
+                            if isinstance(item_from_queue, Exception):
+                                logger.info(f"LLM: Exception in worker: {item_from_queue}")
+                                yield "Lo siento, tuve un problema técnico al procesar su pregunta."
+                                break
+                            
+                            if isinstance(item_from_queue, asyncio.CancelledError):
+                                logger.info("LLM: Loop cancelled during barge-in.")
+                                # Remove Last user question without reply to prevent history pollution
+                                if message_history.in_memory and message_history.in_memory[-1]['role'] == 'user':
+                                    await message_history.rewind_last_message_x(1)
+                                break
+
+                            
+                            full_response += item_from_queue
+                            yield item_from_queue # It's a real sentence
+
+                        except asyncio.TimeoutError:
+                            
+                            if timeout_curr < timeout_limit:
+                                logger.warning("LLM: Producer slow Thinking...")
+                                yield "Estoy pensando"
+                                timeout_curr += 2.0
+                                # Maybe is good to try another provider or default beside current configured.
+                                # It will add more robustness to the system.
+                                # Refactor: Add a fallback provider mechanism below.
+                                continue
+                            else:
+                                logger.error("LLM: Producer cancelled. Timeout.")
+                                yield "Lo siento, tuve un problema técnico al procesar su pregunta."
+                                break
+
+                        except asyncio.CancelledError:
                             logger.info("LLM: Loop cancelled during barge-in.")
-                            # Remove Last user question without reply to prevent history pollution
-                            if message_history.in_memory and message_history.in_memory[-1]['role'] == 'user':
-                                await message_history.rewind_last_message_x(1)
-                            break
-
+                            raise
                         
-                        full_response += item_from_queue
-                        yield item_from_queue # It's a real sentence
-
-                    except asyncio.TimeoutError:
-                        
-                        if timeout_curr < timeout_limit:
-                            logger.warning("LLM: Producer slow Thinking...")
-                            yield "Estoy pensando"
-                            timeout_curr += 2.0
-                            # Maybe is good to try another provider or default beside current configured.
-                            # It will add more robustness to the system.
-                            # Refactor: Add a fallback provider mechanism below.
-                            continue
-                        else:
-                            logger.error("LLM: Producer cancelled. Timeout.")
-                            yield "Lo siento, tuve un problema técnico al procesar su pregunta."
+                        except Exception as e:
+                            logger.error(f"LLM: Unexpected error in consumer: {e}")
+                            yield "Hubo un error inesperado."
                             break
-
-                    except asyncio.CancelledError:
-                        logger.info("LLM: Loop cancelled during barge-in.")
-                        raise
                     
-                    except Exception as e:
-                        logger.error(f"LLM: Unexpected error in consumer: {e}")
-                        yield "Hubo un error inesperado."
-                        break
     except asyncio.CancelledError:
         logger.info("LLM: Producer cancelled.")
         raise  # let it propagate cleanly

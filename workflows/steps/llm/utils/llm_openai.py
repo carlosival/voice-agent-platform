@@ -139,7 +139,7 @@ async def call_llm_stream_openai(
     parent_ctx = set_span_in_context(parent_turn) 
     
     span = tracer.start_span(
-        "llm.stream",
+        "llm.request",
         context=parent_ctx,
         attributes={
             SpanAttributes.OPENINFERENCE_SPAN_KIND: OpenInferenceSpanKindValues.LLM.value,

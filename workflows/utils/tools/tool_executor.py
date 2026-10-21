@@ -1,8 +1,16 @@
-import json
-import asyncio
-from typing import TypedDict, Dict
+import json, time, asyncio
+from typing import TypedDict, Dict, Optional
 from smolagents import Tool, PythonInterpreterTool, FinalAnswerTool
 from .tool_types import ToolCallChunk
+from opentelemetry.trace import Status, StatusCode, set_span_in_context
+
+from openinference.semconv.trace import (
+    SpanAttributes,
+    AudioAttributes,
+    OpenInferenceSpanKindValues,
+    OpenInferenceMimeTypeValues,
+)
+
 
 # Registry: name → async callable
 TOOL_REGISTRY: dict[str, Tool] = {}
@@ -10,23 +18,66 @@ TOOL_REGISTRY: dict[str, Tool] = {}
 import logging
 logger = logging.getLogger(__name__)
 
-async def execute_tool(tc: ToolCallChunk, registry: Dict[str, Tool] = TOOL_REGISTRY) -> Dict[str, str]:
+async def execute_tool(tc: ToolCallChunk, registry: Dict[str, Tool] = TOOL_REGISTRY, tracing_data:Optional[dict] = None) -> Dict[str, str]:
+    
+    parent_span = tracing_data["parent_span"]
+    tracer = tracing_data["tracer"]
+
     """Returns the tool result as a JSON string."""
     tool = registry.get(tc.name)
     logger.info(f"Tool {tc.name} found in registry: {tool}")
     if not tool:
         return {"id":tc.id, "error": f"Unknown tool: {tc.name}"}
-    try:
-        args = json.loads(tc.arguments) if tc.arguments.strip() else {}
-        logger.info(f"Executing tool {tc.name} with arguments {args}")
-        # smolagents Tool.forward() is synchronous – run in executor so the
-        # async contract of execute_tool is preserved without blocking the loop.
-        loop = asyncio.get_event_loop()
-        result = await loop.run_in_executor(None, lambda: tool.forward(**args))
-        logger.info(f"Tool {tc.name} returned result: {result}")
-        return {"id": tc.id, "result": result}
-    except Exception as e:
-        return {"id": tc.id, "error": str(e)}
+
+    # Each tool execution is a separate span under the turn.
+    parent_ctx = (
+        set_span_in_context(parent_span)
+        if parent_span is not None
+        else None
+    )
+
+    with tracer.start_as_current_span("tool.execution", context=parent_ctx) as span: 
+        span.set_attribute(SpanAttributes.OPENINFERENCE_SPAN_KIND, OpenInferenceSpanKindValues.TOOL.value)
+        span.set_attribute(SpanAttributes.TOOL_NAME, tc.name)
+        span.set_attribute(SpanAttributes.TOOL_ID, tc.id or "")
+        
+        try:
+            args = json.loads(tc.arguments) if tc.arguments.strip() else {}
+            logger.info(f"Executing tool {tc.name} with arguments {args}")
+            
+            # smolagents Tool.forward() is synchronous – run in executor so the
+            # async contract of execute_tool is preserved without blocking the loop.
+            span.set_attribute(SpanAttributes.TOOL_PARAMETERS, args)
+            
+            loop = asyncio.get_event_loop()
+            started_at = time.perf_counter()
+            result = await loop.run_in_executor(None, lambda: tool.forward(**args))
+            
+            span.set_attribute(
+                SpanAttributes.OUTPUT_VALUE,
+                str(result) if result is not None else "",
+            )
+            
+            span.set_status(Status(StatusCode.OK))
+            
+            logger.info(f"Tool {tc.name} returned result: {result}")
+            return {"id": tc.id, "result": result}
+        except asyncio.CancelledError as exc:
+            span.set_attribute("tool.cancelled", True)
+            span.set_status(Status(StatusCode.OK))
+            return {"id": tc.id, "error": str(exc)}
+        except Exception as exc:
+            span.record_exception(exc)
+            span.set_status(
+                Status(StatusCode.ERROR, str(exc))
+            )
+            return {"id": tc.id, "error": str(exc)}
+        finally:
+            span.set_attribute(
+                "tool.execution.duration_ms",
+                (time.perf_counter() - started_at) * 1000,
+            )
+            
 
 # Uses this command to test:
 # docker exec -it fastapi python3 utils/tools/executor.py
