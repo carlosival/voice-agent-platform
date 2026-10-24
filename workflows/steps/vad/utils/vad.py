@@ -121,31 +121,25 @@ def silero_has_speech(
     return False
 
 
+def silero_reset_states() -> None:
+    """Clear Silero's LSTM/context state. Call at utterance boundaries."""
+    model = _get_silero_model()
+    model.reset_states()
+
 def silero_has_speech_from_numpy(
     pcm:       np.ndarray,
     threshold: float = 0.7,
 ) -> bool:
-    model  = _get_silero_model()
     """
-    audio:
-        float32 mono audio
-        16 kHz
-        normalized to [-1, 1]
+    pcm: float32 mono, 16 kHz, in [-1, 1], exactly 512 samples.
     """
-
-    chunk_size = 512
-    for i in range(0, len(pcm), chunk_size):
-        chunk = pcm[i:i + chunk_size]
-        if len(chunk) < chunk_size:
-            break
-        audio_tensor = torch.from_numpy(
-            chunk.astype(np.float32, copy=False)
-        ).to(_device)
+    model = _get_silero_model()
+    audio_tensor = torch.from_numpy(
+        np.ascontiguousarray(pcm, dtype=np.float32)
+    ).to(_device)
+    with torch.inference_mode():
         confidence = model(audio_tensor, SILERO_SAMPLE_RATE).item()
-        if confidence >= threshold:
-            return True
-
-    return False
+    return confidence >= threshold
 
 
 # ════════════════════════════════════════════════════════════════════════════════

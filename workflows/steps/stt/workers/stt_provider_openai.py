@@ -46,7 +46,39 @@ def frames_to_pcm_s16le(frames: list[AudioFrame]) -> bytes:
 
     return b"".join(pcm_chunks)
 
-async def call_stt( frames: list[AudioFrame], 
+
+def pcm_f32le_to_pcm_s16le(pcm: np.ndarray) -> bytes:
+    """
+    Convert mono audio from:
+        float32 [-1.0, 1.0]
+    to:
+        PCM signed 16-bit little-endian (S16LE).
+
+    Args:
+        pcm: NumPy array containing float32 audio samples.
+
+    Returns:
+        Raw PCM S16LE bytes.
+    """
+    samples = np.asarray(pcm, dtype=np.float32).flatten()
+
+    # Replace invalid values
+    samples = np.nan_to_num(
+        samples,
+        nan=0.0,
+        posinf=1.0,
+        neginf=-1.0,
+    )
+
+    # Clamp samples to the valid audio range
+    samples = np.clip(samples, -1.0, 1.0)
+
+    # Convert float32 to signed 16-bit PCM
+    pcm_s16 = (samples * 32767.0).astype("<i2")
+
+    return pcm_s16.tobytes()
+
+async def call_stt( utterance_pcm_f32le: np.ndarray, 
                     model: str = STT_MODEL, 
                     provider:str ="unknow", 
                     language: str = STT_LANGUAGE, 
@@ -54,13 +86,17 @@ async def call_stt( frames: list[AudioFrame],
                     base_url: str = STT_BASE_URL, 
                     http_client: Optional[httpx.AsyncClient] = None, 
                     tracing_data: dict = {}) -> str:
-    # Flatten the list of AudioFrame objects into one PCM byte string
-    # Silero frames:
-    # float32 / mono / 16 kHz
-    #
-    # Convert to:
-    # int16 / mono / 16 kHz
-    pcm_s16le_bytes = frames_to_pcm_s16le(frames)
+    """
+    Transcribe an utterance detected by Silero VAD.
+
+    Args:
+        utterance_pcm_f32le: Concatenated mono float32 audio samples
+            belonging to a single utterance, normalized to [-1.0, 1.0].
+
+    Returns:
+        Transcribed text.
+    """
+    pcm_s16le_bytes = pcm_f32le_to_pcm_s16le(utterance_pcm_f32le)
 
    
     return await call_stt_openai(audio=pcm_s16le_bytes, 

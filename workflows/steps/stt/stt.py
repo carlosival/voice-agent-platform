@@ -21,9 +21,9 @@ def cancel_all_tasks(tasks: list[asyncio.Task]):
 
 # ════════════════════════════════════════════════════════════════════════════════
 # TRANSFORM 2  –  STT
-# Reads audio frames from the source, utterance by utterance 
+# Reads p.narray from the source, utterance by utterance 
 # and converts them to text using STT provider
-# list[AudioFrame]  →  str
+# list[np.narray] F32LE  →  str
 # ════════════════════════════════════════════════════════════════════════════════
 
 async def stt_stream(
