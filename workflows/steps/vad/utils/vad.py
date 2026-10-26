@@ -6,7 +6,7 @@ import httpx
 import torch
 from httpx import AsyncClient
 from scipy.signal import resample_poly
-
+from typing import Optional
 
 SAMPLE_RATE        = 48000
 SILERO_SAMPLE_RATE = 16000                          # Silero expects 16kHz
@@ -77,16 +77,13 @@ def rms_has_speech(
 # LAYER 2 — Silero VAD local on GPU  (~0.1–0.3ms, no network)
 # ════════════════════════════════════════════════════════════════════════════════
 
-_silero_model = None   # lazy-loaded singleton
 
 
-def _get_silero_model():
-    """Load Silero VAD once, move to GPU, reuse for all calls."""
-    global _silero_model
-    if _silero_model is None:
-        from silero_vad import load_silero_vad
-        _silero_model = load_silero_vad().to(_device)
-    return _silero_model
+def get_silero_model():
+    
+    from silero_vad import load_silero_vad
+    return load_silero_vad().to(_device)
+    
 
 
 def silero_has_speech(
@@ -121,19 +118,20 @@ def silero_has_speech(
     return False
 
 
-def silero_reset_states() -> None:
+def silero_reset_states(model:Optional[None] = None) -> None:
     """Clear Silero's LSTM/context state. Call at utterance boundaries."""
-    model = _get_silero_model()
+    model = model or get_silero_model()
     model.reset_states()
 
 def silero_has_speech_from_numpy(
     pcm:       np.ndarray,
     threshold: float = 0.7,
+    model: Optional[None] = None
 ) -> bool:
     """
     pcm: float32 mono, 16 kHz, in [-1, 1], exactly 512 samples.
     """
-    model = _get_silero_model()
+    model = model or get_silero_model()
     audio_tensor = torch.from_numpy(
         np.ascontiguousarray(pcm, dtype=np.float32)
     ).to(_device)

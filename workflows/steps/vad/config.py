@@ -29,3 +29,5 @@ VAD_WINDOW_SIZE      = 50          # frames per VAD call  (~1 s @ 20 ms/frame)
 VAD_SILENCE_WINDOWS_LIMIT = 3      # silent windows after speech → flush utterance
 VAD_THRESHOLD   = 0.5
 VAD_STRIDE    = 10  # call VAD every 20 frames -> call every 400ms
+
+SILERO_THRESHOLD = 0.7

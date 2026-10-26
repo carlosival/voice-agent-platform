@@ -1,7 +1,7 @@
 
 from workflows.steps.turn.utils import predict_endpoint
 from workflows.signals import SignalFrame, WarmUp, AskUserStillThere, EndOfStream, StartSpeaking, EndSpeaking
-from .utils import silero_has_speech_from_numpy, silero_reset_states
+from .utils import silero_has_speech_from_numpy, silero_reset_states, get_silero_model
 from yaafpy.types import ExecContext
 from av import AudioFrame
 from typing import AsyncGenerator
@@ -21,7 +21,7 @@ from concurrent.futures import ThreadPoolExecutor
 from .config import (
     CONFIRM_TURN, MAX_UTTERANCE_LEN,
     INACTIVITY_STOP, MAX_ASK_USER, INACTIVITY_FRAMES,
-    START_FRAMES, STOP_FRAMES, VAD_CHUNK_SAMPLES
+    START_FRAMES, STOP_FRAMES, VAD_CHUNK_SAMPLES, SILERO_THRESHOLD
 )
 
 logger = logging.getLogger(__name__)
@@ -66,7 +66,7 @@ async def vad_gate(source: AsyncGenerator, ctx: ExecContext) -> AsyncGenerator[l
     
     n_chunks = 0
 
-    
+    silero_model = get_silero_model()
 
     # Consumer
     try:
@@ -75,8 +75,6 @@ async def vad_gate(source: AsyncGenerator, ctx: ExecContext) -> AsyncGenerator[l
 
         harvester_task = asyncio.create_task(vad_backpressure_input(source, vad_queue))
 
-
-        _executor = ThreadPoolExecutor(max_workers=1)
         while True:
 
             pcm = await vad_queue.get()
@@ -103,8 +101,8 @@ async def vad_gate(source: AsyncGenerator, ctx: ExecContext) -> AsyncGenerator[l
                 buffer = buffer[VAD_CHUNK_SAMPLES:]
 
                 try:
-                    confident = silero_has_speech_from_numpy(chunk)
-                    #logger.info(f"VAD: confident={confident}")
+                    confident = silero_has_speech_from_numpy(pcm=chunk, threshold=SILERO_THRESHOLD, model=silero_model)
+                    
                 except Exception:
                     logger.exception("VAD: inference failed on this chunk")
                     raise
@@ -167,11 +165,12 @@ async def vad_gate(source: AsyncGenerator, ctx: ExecContext) -> AsyncGenerator[l
                                 utterance_buf.append(chunk)
                                 state          = VADState.STOPPING
                                 stopping_count += 1
-                            case VADState.STOPPING: # Extend the stopping Pause
+                            case VADState.STOPPING: # Extend the Pause
                                 stopping_count += 1    
                                 try:
-                                    # Utterance Buf should exist because Stopping came after  speaking 
-                                    if utterance_buf and stopping_count >= CONFIRM_TURN:
+                                    # Utterance Buf should exist because Stopping came after speaking 
+                                    # Only one time in the pause will be call prediction turn
+                                    if utterance_buf and stopping_count == CONFIRM_TURN:
                                         audio = np.concatenate(utterance_buf).astype(np.float32, copy=False)
                                         prediction = predict_endpoint(audio)
                                         probability = prediction.get("probability", 0.0) if isinstance(prediction, dict) else float(prediction)
@@ -215,7 +214,7 @@ async def vad_gate(source: AsyncGenerator, ctx: ExecContext) -> AsyncGenerator[l
                                             starting_count = 0
                                             stopping_count = 0
                                             consecutive_silence_counter = 0
-                                            silero_reset_states()
+                                            silero_reset_states(silero_model)
                                             continue # Skip the hard STOP_FRAMES check if endpointing triggers successfully
                                 except Exception:
                                     logger.exception("TURN: inference failed during stopping state")      
@@ -288,7 +287,7 @@ async def vad_gate(source: AsyncGenerator, ctx: ExecContext) -> AsyncGenerator[l
         return
 
     finally: 
-        _executor.shutdown(wait=False)
+       
 
         harvester_task.cancel()
         if current_turn:
