@@ -64,8 +64,6 @@ async def vad_gate(source: AsyncGenerator, ctx: ExecContext) -> AsyncGenerator[l
 
     vad_queue: asyncio.Queue[np.ndarray] = asyncio.Queue()
     
-    n_chunks = 0
-
     silero_model = get_silero_model()
 
     # Consumer
@@ -107,14 +105,9 @@ async def vad_gate(source: AsyncGenerator, ctx: ExecContext) -> AsyncGenerator[l
                     logger.exception("VAD: inference failed on this chunk")
                     raise
                 
-
-                n_chunks += 1
-                if n_chunks % 25 == 0:
-                    logger.info(
-                        f"VAD dbg | state={state.name} conf={confident} "
-                        f"peak={np.abs(chunk).max():.3f} buf={len(utterance_buf)} "
-                        f"stop={stopping_count} q={vad_queue.qsize()} ask={ask_user}"
-                    )
+                if state == VADState.QUIET and consecutive_silence_counter % 100 == 0:
+                    logger.info("VAD quiet: counter=%d/%d state=%s qsize=%d",
+                    consecutive_silence_counter, INACTIVITY_FRAMES, state, vad_queue.qsize())
 
                 try:
                     if confident:
@@ -148,15 +141,17 @@ async def vad_gate(source: AsyncGenerator, ctx: ExecContext) -> AsyncGenerator[l
                         match state:
                             case VADState.QUIET: # The Inactivity Period or Silences Just Extends
                                 consecutive_silence_counter += 1
-                                # Check for hard stop (e.g., 120 seconds)
+                               
                                 if consecutive_silence_counter >= INACTIVITY_STOP:
                                     logger.info("VAD: Absolute inactivity limit reached. Closing pipeline.")
                                     yield EndOfStream()
                                     return # This kills the generator
+                                '''    
                                 if ask_user < MAX_ASK_USER and consecutive_silence_counter >= INACTIVITY_FRAMES:
                                     logger.info("VAD: Max silence between utterances reached. Reactivating.")
                                     yield AskUserStillThere()
                                     ask_user += 1
+                                '''    
                             case VADState.STARTING: # Just Noise or False or Insuficiente Speech Detection
                                 state          = VADState.QUIET
                                 starting_count = 0

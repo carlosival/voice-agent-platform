@@ -61,22 +61,23 @@ async def tts_stream(
     current_task = None
     tts_queue = asyncio.Queue()
     
-    
-    current_task = asyncio.create_task(
-        get_tts_provider_worker(tts_provider_name)(
-            http_client=http_client, 
-            output_track=output_track, 
-            tts_queue=tts_queue, 
-            provider_name=tts_provider_name, 
-            model=tts_model,
-            voice=tts_voice,
-            language=tts_language,
-            api_key=tts_api_key,
-            base_url=tts_base_url,
-            tracing_data={"tracer": tracer,"parent_span": turn_trace}
-            ))
-
     try:
+
+        current_task = asyncio.create_task(
+            get_tts_provider_worker(tts_provider_name)(
+                http_client=http_client, 
+                output_track=output_track, 
+                tts_queue=tts_queue, 
+                provider_name=tts_provider_name, 
+                model=tts_model,
+                voice=tts_voice,
+                language=tts_language,
+                api_key=tts_api_key,
+                base_url=tts_base_url,
+                tracing_data={"tracer": tracer,"parent_span": turn_trace}
+                )
+        )
+
         async for sentence in source:
             if isinstance(sentence, Span):
                 turn_trace = sentence
@@ -91,11 +92,12 @@ async def tts_stream(
                 logger.info("TTS: EndOfStream received. Cleaning up.")
                 # Optional: Send a goodbye message before killing
                 await asyncio.wait_for(tts_queue.put("¡Hasta luego!"), timeout=2.0) 
-                await asyncio.wait_for(tts_queue.put(None), timeout=2.0)
-                break
+                
             # 1. SIGNAL HANDLING (The "Kill Switch")
             if isinstance(sentence, StartSpeaking):
                 logger.info("[AUDIO_KILL] TTS received StartSpeaking. Purging output track.")
+
+                
                 # Clear pending sentences
                 while not tts_queue.empty():
                     tts_queue.get_nowait()
@@ -107,7 +109,8 @@ async def tts_stream(
                     except asyncio.CancelledError:
                         pass
                 output_track.clear()
-                # Restart the sequential worker
+                
+                # Restart the worker
                 current_task = asyncio.create_task(
                                                     get_tts_provider_worker(tts_provider_name)(
                                                         http_client=http_client, 
@@ -122,6 +125,7 @@ async def tts_stream(
                                                         tracing_data={"tracer": tracer,"parent_span": turn_trace}
                                                         ))
                 continue
+                
 
             # 2. DATA HANDLING (The Sentence)
             if isinstance(sentence, str):
@@ -138,9 +142,10 @@ async def tts_stream(
         logger.error(f"TTS Main Loop Exception: {e}", exc_info=True)
         raise
     finally:
-        await asyncio.wait_for(tts_queue.put(None), timeout=2.0)  # shutdown sentinel
-        if current_task and not current_task.done():
-            current_task.cancel()
+        if  current_task and not current_task.done():
+            # Single sentinel, then let the worker finish the queue
+            await tts_queue.put(None)
+            
         # This is critical for yaafpy
         raise WorkflowAbortException("End of stream.")
 

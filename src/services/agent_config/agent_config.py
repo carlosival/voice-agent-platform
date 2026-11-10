@@ -64,13 +64,14 @@ if __name__ == "__main__":
         print(json.dumps(cfg, indent=2, default=str))
         print("-" * 60)
 
+        
         problems = validate_agent_config(cfg)
         if problems:
             print("❌ Schema problems:")
             for p in problems:
                 print(f"   - {p}")
             return 1
-
+        
         print("✅ Config matches the schema")
         print(f"   agent      : {cfg['meta']['name']} ({cfg['meta']['agent_id']})")
         print(f"   hash       : {cfg['meta']['config_hash']}")

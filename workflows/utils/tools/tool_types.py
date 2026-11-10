@@ -1,4 +1,12 @@
 from dataclasses import dataclass, field
+from typing import Optional, Any
+
+@dataclass
+class ToolResult:
+    """This is the result of Tool execution """
+    id:        str
+    result:    Optional[Any] = None
+    error: Optional[str] = None
 
 @dataclass
 class ToolCallChunk:

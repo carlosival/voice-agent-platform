@@ -1,0 +1,251 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Agent Schema",
+  "type": "object",
+  "properties": {
+    "meta": {
+      "type": "object",
+      "properties": {
+        "agent_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "pk_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "name": {
+          "type": "string"
+        },
+        "strategy": {
+          "type": "string"
+        },
+        "generated_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "config_hash": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "agent_id",
+        "pk_id",
+        "name",
+        "strategy",
+        "generated_at",
+        "config_hash"
+      ]
+    },
+    "schema_version": {
+      "type": "number"
+    },
+    "access": {
+      "type": "object",
+      "properties": {
+        "tier": {
+          "type": "string"
+        },
+        "regions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "allowed_domains": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "tier",
+        "regions",
+        "allowed_domains"
+      ]
+    },
+    "models": {
+      "type": "object",
+      "properties": {
+        "llm": {
+          "type": "object",
+          "properties": {
+            "model": {
+              "type": "string"
+            },
+            "engine": {
+              "type": "string"
+            },
+            "temperature": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "model",
+            "engine",
+            "temperature"
+          ]
+        },
+        "tts": {
+          "type": "object",
+          "properties": {
+            "model": {
+              "type": "string"
+            },
+            "speed": {
+              "type": "number"
+            },
+            "engine": {
+              "type": "string"
+            },
+            "language": {
+              "type": "string"
+            },
+            "voice_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "model",
+            "speed",
+            "engine",
+            "language",
+            "voice_id"
+          ]
+        },
+        "stt": {
+          "type": "object",
+          "properties": {
+            "model": {
+              "type": "string"
+            },
+            "engine": {
+              "type": "string"
+            },
+            "language": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "model",
+            "engine",
+            "language"
+          ]
+        }
+      },
+      "required": [
+        "llm",
+        "tts",
+        "stt"
+      ]
+    },
+    "prompt": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "version": {
+          "type": "integer"
+        },
+        "template": {
+          "type": "string"
+        },
+        "input_schema": {
+          "$comment": "Prompt template input definition should be match input",
+          "$ref": "https://json-schema.org/draft/2020-12/schema"
+        },
+        "output_schema": {
+          "$comment": "LLM output schema is not output schema is define default is str value",
+          "$ref": "https://json-schema.org/draft/2020-12/schema"
+        }
+      },
+      "required": [
+        "id",
+        "version",
+        "template",
+        "input_schema",
+        "output_schema"
+      ]
+    },
+    "input": {
+      "$comment": "This object have to match the input_schema in prompt and provider values for it",
+      "type": "object",
+      "properties": {}
+    },
+    "state": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "schema": {
+          "$ref": "https://json-schema.org/draft/2020-12/schema"
+        }
+      },
+      "required": [
+        "id",
+        "schema"
+      ]
+    },
+    "tools": {
+    "$comment": "This object have to match the input_schema in prompt and provider values for it",
+    "type": "object",
+    "additionalProperties": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "description": {
+          "type": "string"
+        },
+        "parameters": {
+          "$comment": "Should be use to validate the params LLM provides",  
+          "$ref": "https://json-schema.org/draft/2020-12/schema"
+        },
+        "output_schema": {
+          "$comment": "Should be use to validate tool execution", 
+          "$ref": "https://json-schema.org/draft/2020-12/schema"
+        },
+        "config": {
+          "$comment": "Holds properties such as keys, environment variables, and any other configuration needed to perform an action, in addition to its parameters", 
+          "type": "object",
+          "additionalProperties": true
+        }
+      },
+      "required": [
+        "id",
+        "description",
+        "parameters",
+        "output_schema",
+        "config"
+      ],
+      "additionalProperties": false
+    }
+    
+  },
+    "custom": {
+      "$comment": "Holds runtime values to config workflow's run",  
+      "type": "object",
+      "additionalProperties": true
+      }
+    
+  },
+  "required": [
+    "meta",
+    "schema_version",
+    "access",
+    "models",
+    "prompt",
+    "input",
+    "state",
+    "tools",
+    "custom"
+  ],
+  "additionalProperties": false
+}

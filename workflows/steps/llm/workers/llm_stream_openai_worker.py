@@ -3,7 +3,7 @@ from typing import Optional
 from httpx import AsyncClient
 from workflows.utils.memory import IMemory
 from workflows.utils.tools import Tool
-from workflows.utils.tools.tool_types import ToolCallChunk
+from workflows.utils.tools.tool_types import ToolCallChunk, ToolResult
 from workflows.utils.tools.tool_executor import execute_tool
 from workflows.utils.context.message_context_builder import build_chat_messages
 from smolagents.models import get_tool_json_schema
@@ -54,6 +54,32 @@ def sanitize_sentence(text: str) -> str:
     - RETRY LOGIC
     - ETC
 '''
+
+async def post_tool_call(
+    mapped_calls: list[ToolCallChunk],
+    results: list[ToolResult],
+    *,
+    memory: IMemory,
+    tracing_data
+) -> list[(ToolCallChunk, ToolResult)] | EndOfStream | None:
+
+    logger.info(f"list of ToolChunks: {mapped_calls}")
+    logger.info(f"list of Results: {results}")
+
+    # Add tools calls and results to message history
+    await memory.add_tools_calls(mapped_calls)
+    await memory.add_tools_results(results)
+    
+    if EndOfStream in [type(r.get("result", None)) for r in results]:
+        logger.info("[llm_stream] EndOfStream from tool result. Finishing conversation.")
+        return EndOfStream()
+                  
+    zip_tc_results = zip(mapped_calls, results, strict=True)
+    return list(zip_tc_results)
+
+                        
+                        
+
 
 async def call_llm_stream_openai_worker(
     text: str,
@@ -198,7 +224,7 @@ async def call_llm_stream_openai_worker(
                         # This is the spot for post-processing hooks that should run
                         # once per full assistant turn (not per tool-call round):
                         #   - append the assistant's full text response to memory/history
-                        #   - run evals / logging / cost tracking
+                        #   - run evals / logging / cost tracking / rules / bussiness logic check, etc
                         #   - signal "end of assistant turn" downstream if your consumer needs it
                         logger.info("[llm_stream] Normal finish — assistant turn complete.")
                         if buffer.strip():
@@ -234,43 +260,29 @@ async def call_llm_stream_openai_worker(
                             f"[llm_stream] Reduced tool calls: {mapped_calls}"
                         )
 
-                        # Could be sequential or parallel, as needed
-                        # Parallel execution via asyncio.gather if async tools
-                        results = await asyncio.gather(*[execute_tool(tc, tools, tracing_data=tracing_data) for tc in mapped_calls])
-                        logger.info(f"[llm_stream] Tool call results: {results}")
+                        try:
+                            results = await asyncio.gather(
+                                *(
+                                    execute_tool(
+                                        tc,
+                                        tools,
+                                        tracing_data=tracing_data,
+                                    )
+                                    for tc in mapped_calls
+                                )
+                            )
 
-                        
-                        if EndOfStream in [type(r.get("result", None)) for r in results]:
-                            logger.info("[llm_stream] EndOfStream from tool result. Finishing conversation.")
-                            sentence_queue.put_nowait(EndOfStream())
-                            break
-                                   
-                        zip_tc_results = zip(mapped_calls, results, strict=True)
-                        sentence_queue.put_nowait(list(zip_tc_results))
+                            # Owns tools postprocessing according to bussiness logic, history updates, result,
+                            # Semantic Layer Ontological Layer
+                            # return signals
+                            signal = await post_tool_call(mapped_calls, results, memory=memory, tracing_data=tracing_data)
 
-                        # Process tool call results according to bussiness logic
-                        # Add tools calls and results to message history
-                        await message_history.add_tools_calls(mapped_calls)
-                        await message_history.add_tools_results(results)
-                        
-                        # Add results to processing queue all, some or none depending of the busssiness logic
-                        for tc_result in results:
-                            result = tc_result.get("result", None)
-                            if result is not None:
-                                if isinstance(result, str):
-                                    sentence_queue.put_nowait(result)
-                                if isinstance(result, EndOfStream):
-                                    sentence_queue.clear()
-                                    sentence_queue.put_nowait(result)
-                                    break
-                                    
+                            # Exactly one component owns signal delivery.
+                            if signal is not None:
+                                sentence_queue.put_nowait(signal)
 
-                        #Signal to the consumer that the tool calls have been processed
-                        sentence_queue.put_nowait(mapped_calls) 
-
-                        tool_calls_acc.clear()
-                
-            
+                        finally:
+                            tool_calls_acc.clear()
 
         except asyncio.CancelledError as cancel_error:
             logger.info("[llm_stream] Cancelled by signal.")

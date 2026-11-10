@@ -1,9 +1,11 @@
 from yaafpy import ExecContext
 from src.peer import PeerDependencies, PeerSession
 from src.pipelines.audio_pipeline import audio_pipeline
+from src.utils import schema_to_dict
 from workflows.utils.tools import EndConversationTool
 from workflows.utils.memory import InMemoryMemory
 from workflows.utils.observavility import get_tracer
+from workflows.utils.context.prompts.prompt_render import render_prompt
 from httpx import AsyncClient
 from workflows.steps.outputs import AudioOutputTrack
 from httpx import AsyncClient
@@ -40,27 +42,6 @@ tracer = get_tracer()
 TOOL_CLASSES = {'end_conversation': EndConversationTool}
 
 
-_PLACEHOLDER = re.compile(r"\{\{\s*(\w+)\s*\}\}")
-
-
-def render_template(template: str, values: dict, *, strict: bool = False) -> str:
-    """Replace {{name}} with values["name"].
-
-    strict=False: unknown placeholders stay as {{name}} (useful for state
-                  placeholders that are filled later during the call).
-    strict=True:  unknown placeholders raise KeyError.
-    """
-    def repl(m: re.Match) -> str:
-        name = m.group(1)
-        if name in values:
-            return str(values[name])
-        if strict:
-            raise KeyError(f"Missing value for placeholder: {name}")
-        return m.group(0)               # leave it untouched
-
-    return _PLACEHOLDER.sub(repl, template)
-
-
 class DepProvider:
     @staticmethod
     async def build(session_id: str, agent_config: dict[str, Any] = None, active_sessions: dict[str, PeerSession] = None) -> PeerDependencies:
@@ -87,7 +68,7 @@ class DepProvider:
                 f"{SpanAttributes.SESSION_ID}": session_id,
                 "agent_id": str(agent_config.get("meta", {}).get("agent_id", "")),
                 f"{SpanAttributes.PROMPT_ID}": str(agent_config.get("prompt", {}).get("id", "")),
-                "state": str(agent_config.get("state", {}).get("id", "")), 
+                "state": agent_config.get("state", {}).get("id", None), 
                 "tools": ",".join([tool["id"] for tool in agent_config.get("tools",{}).values()]),
                 f"{SpanAttributes.OPENINFERENCE_SPAN_KIND}": str(agent_config.get("meta", {}).get("strategy", "")),
                 f"{SpanAttributes.AGENT_NAME}": str(agent_config.get("meta", {}).get("name", "")),
@@ -98,7 +79,14 @@ class DepProvider:
             },
         )
 
-        
+        # State configuration
+        state_config = None
+        if agent_config.get("state", None) and agent_config.get("state", {}).get("value"):
+            state_config = {
+                "schema": agent_config.get("state", {}).get("schema", {}),
+                "value":  schema_to_dict(agent_config.get("state", {}).get("schema", {})),
+            }  
+
 
         # 2. Load Tools
         tools_registry = {}
@@ -115,7 +103,7 @@ class DepProvider:
             tools_registry[key] = cls(cfg)
 
         # 3. Load Prompts
-        system_prompt = render_template(agent_config["prompt"]["template"], agent_config["input"])
+        system_prompt = render_prompt(agent_config["prompt"]["template"], agent_config["input"])
         
         #system_prompt = get_prompt(agent_config.get("llm_config", {}).get("system_prompt", None))
 
@@ -140,6 +128,7 @@ class DepProvider:
             "tts_config": agent_config.get("models",{}).get("tts",{}),
             "llm_config": agent_config.get("models", {}).get("llm",{}),
             "message_history": InMemoryMemory(),
+            "state": state_config,
             "resources": {
                 "output_track": AudioOutputTrack(),
                 "http_client": http_client,

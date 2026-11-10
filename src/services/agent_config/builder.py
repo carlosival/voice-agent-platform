@@ -1,6 +1,9 @@
 import copy, re, hashlib, json
 from datetime import datetime, timezone
 from typing import Any, Optional
+from src.utils import schema_to_dict, merge_dict, deep_merge
+from jsonschema import Draft202012Validator, ValidationError, FormatChecker
+from pathlib import Path
 
 '''
     Builder is responsable to serialize AGENT ORM object to JSON Schema Version.X
@@ -65,49 +68,6 @@ def _json_type_ok(value: Any, t: Any) -> bool:
     return py is None or isinstance(value, py)
 
 
-def _resolve_input(schema: Any, patch: dict) -> dict[str, Any]:
-    schema = _as_dict(schema)
-    props = _as_dict(schema.get("properties"))
-    required = set(schema.get("required") or [])
-
-    unknown = set(patch) - set(props)
-    if unknown:
-        raise AgentConfigError(f"input has keys not in input_schema: {sorted(unknown)}")
-
-    values: dict[str, Any] = {}
-    for name, spec in props.items():
-        spec = _as_dict(spec)
-        if name in patch:
-            v = patch[name]
-        elif "default" in spec:
-            v = spec["default"]
-        elif name in required:
-            raise AgentConfigError(f"input.{name} is required by input_schema")
-        else:
-            continue
-
-        if not _json_type_ok(v, spec.get("type")):
-            raise AgentConfigError(f"input.{name} must be of type {spec.get('type')}")
-        if "enum" in spec and v not in spec["enum"]:
-            raise AgentConfigError(f"input.{name} must be one of {spec['enum']}")
-        values[name] = copy.deepcopy(v)
-    return values
-
-PLACEHOLDER_RE = re.compile(r"\{\{(.*?)\}\}", re.DOTALL)
-IDENT_RE = re.compile(r"^\w+$")
-
-
-def _template_placeholders(template: str) -> tuple[set[str], list[str]]:
-    """Returns (valid names, malformed raw placeholders)."""
-    names, bad = set(), []
-    for raw in PLACEHOLDER_RE.findall(template or ""):
-        name = raw.strip()
-        if IDENT_RE.match(name):
-            names.add(name)
-        else:
-            bad.append(raw)          # e.g. {{ user.name }}, {{ }}, {{a|upper}}
-    return names, bad
-
 
 def build_agent_config(assoc) -> dict[str, Any]:
     agent = assoc.agent
@@ -115,17 +75,12 @@ def build_agent_config(assoc) -> dict[str, Any]:
     pv = agent.prompt_version
     state = pv.state
     override = _as_dict(assoc.custom_config_override)
+   
 
     
-    # ---- state: schema of the values the LLM tracks at runtime ---------
-    fields: dict[str, dict] = {}
-    for a in (state.associated_fields if state else []):
-        fields[a.field.name] = {
-            "type": a.field.type,
-            "description": a.field.description,
-            "required": a.required,  # runtime meaning: must be filled before call ends / tool fires
-        }
-
+    # ---- state schema the LLM tracks at runtime ---------
+    dict_state = schema_to_dict(state.state_schema)
+    
     # ---- models --------------------------------------------------------
     models = {
         "llm": copy.deepcopy(agent.llm_config),
@@ -180,7 +135,9 @@ def build_agent_config(assoc) -> dict[str, Any]:
 
 
     # ---- input: values for prompt.input_schema -------------------------
-    input_values = _resolve_input(pv.input_schema, _as_dict(override.get("input")))
+    input_patch = _as_dict(override.get("input"))
+    input_dict = schema_to_dict(agent.prompt_version.input_schema)
+    input_values = deep_merge(input_dict, input_patch)
 
 
     # ---- assemble ------------------------------------------------------
@@ -200,7 +157,7 @@ def build_agent_config(assoc) -> dict[str, Any]:
             "output_schema": copy.deepcopy(pv.output_schema),
         },
         "input": input_values,
-        "state": {"id": str(state.id),"fields": fields},
+        "state": {"id": str(state.id), "value": dict_state, "schema": state.state_schema},
         "tools": tools,
         "custom": custom,
     }
@@ -220,6 +177,44 @@ def build_agent_config(assoc) -> dict[str, Any]:
         **body,
     }
 
+
+def validate_agent_config(
+    config_path: str,
+    schema_path: str = "agent_schema.json"
+) -> dict:
+
+    schema = json.loads(
+        Path(schema_path).read_text(encoding="utf-8")
+    )
+
+    data = json.loads(
+        Path(config_path).read_text(encoding="utf-8")
+    )
+
+    Draft202012Validator.check_schema(schema)
+
+    validator = Draft202012Validator(
+        schema,
+        format_checker=FormatChecker()
+    )
+
+    errors = sorted(
+        validator.iter_errors(data),
+        key=lambda e: list(map(str, e.absolute_path))
+    )
+
+    if errors:
+        details = [
+            f"{'.'.join(map(str, e.absolute_path))}: {e.message}"
+            for e in errors
+        ]
+        raise ValueError(
+            "Invalid agent configuration:\n" + "\n".join(details)
+        )
+
+    return data
+
+'''
 def validate_agent_config(cfg: dict) -> list[str]:
     """Returns a list of problems. Empty list means the config is valid."""
     errs: list[str] = []
@@ -334,3 +329,4 @@ def validate_agent_config(cfg: dict) -> list[str]:
         errs.append(f"not JSON-serializable: {e}")
 
     return errs
+'''

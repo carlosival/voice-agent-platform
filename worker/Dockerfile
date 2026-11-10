@@ -27,7 +27,9 @@ COPY src/clients/ ./src/clients/
 COPY src/services/ ./src/services/
 COPY src/peer/ ./src/peer/
 COPY src/pipelines/ ./src/pipelines/ 
+COPY src/utils/ ./src/utils/ 
 COPY workflows/ ./workflows/ 
+
 
 # Worker Files
 COPY worker/worker.py .

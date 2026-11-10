@@ -1,10 +1,10 @@
 from typing import Dict, AsyncGenerator
-from .workers import call_llm_stream_openai_worker, get_llm_provider_worker, get_provider_url
+from .workers import call_llm_stream_openai_worker, get_llm_provider_worker, get_provider_url, extract_state_updates
 from workflows.signals import SignalFrame, WarmUp, AskUserStillThere, EndOfStream, StartSpeaking
 from workflows.utils.tools import Tool
 from opentelemetry.trace import Span, Status, StatusCode, set_span_in_context
 from yaafpy.types import ExecContext
-import logging, asyncio
+import logging, asyncio, os
 
 
 from openinference.semconv.trace import (
@@ -16,6 +16,13 @@ from openinference.semconv.trace import (
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+EXTRACTOR_MODEL="gpt-oss-20b"
+EXTRACTOR_LLM_KEY = os.getenv("EXTRACTOR_LLM_KEY", None)
+EXTRACTOR_LLM_PROVIDER = "groq"
+
+if not EXTRACTOR_LLM_KEY:
+    raise Exception(f"EXTRACTOR_LLM_KEY not set")
 
 async def llm_stream(
     source: AsyncGenerator,
@@ -37,6 +44,12 @@ async def llm_stream(
     llm_config = ctx.shared_data["llm_config"]
     api_key = ctx.shared_data["llm_api_key"]
     tracer = ctx.shared_data["resources"]["tracer"]
+
+    state_config = ctx.shared_data.get("state", None)
+    state_schema =  state_config.get("schema", None) if state_config else None
+    state =state_config.get("value", None) if state_config else None
+    state_task = None
+
     turn_trace = None
     
     timeout_limit = 5.0
@@ -80,6 +93,36 @@ async def llm_stream(
                 
                 
                 parent_ctx = set_span_in_context(turn_trace)
+
+                if state and state_schema:
+                    '''
+                        This portion of code is intenting to extract information
+                        from the conversation. We call this (conversation state)
+                    '''
+                    
+
+                    # 1. Start background state extraction
+                    if state_task and not state_task.done():
+                        # The previous turn should normally have been reconciled
+                        await state_task
+
+                    with tracer.start_as_current_span("llm.state_extraction", context=parent_ctx) as span:
+
+                        state_task = asyncio.create_task(
+                            extract_state_updates(
+                                user_text=item,
+                                current_state=state,
+                                state_schema=state_schema,
+                                http_client=http_client,
+                                provider_url=get_provider_url(EXTRACTOR_LLM_PROVIDER),
+                                api_key=EXTRACTOR_LLM_KEY,
+                                tracing_data={"tracer": tracer, "parent_span": span},
+                                model=EXTRACTOR_MODEL,
+                                
+                            )
+                        )
+                
+                
                 
                 with tracer.start_as_current_span("llm.tool_loop", context=parent_ctx) as span:
                     span.set_attribute(SpanAttributes.INPUT_VALUE, item)
@@ -152,7 +195,6 @@ async def llm_stream(
                             if isinstance(item_from_queue, EndOfStream):
                                 logger.info("[llm_stream] EndOfStream from LLM worker. Finishing conversation.")
                                 # Good bye message
-                                yield "Hasta luego"
                                 await message_history.add_user_message(item)
                                 await message_history.add_ai_message("Hasta luego", None)
                                 await asyncio.sleep(0.8) # Wait for the TTS to finish and send EndOfStream

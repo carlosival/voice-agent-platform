@@ -316,6 +316,8 @@ services:
       LLM_BASE_URL: ${LLM_BASE_URL}
       LLM_MODEL: ${LLM_MODEL}
       LLM_API_KEY: ${LLM_API_KEY}
+      EXTRACTOR_LLM_KEY: ${EXTRACTOR_LLM_KEY}
+      
 
       # ── LangFuse Tracing ──────────────────────────────────────────────────────────
       LANGFUSE_SECRET_KEY: ${LANGFUSE_SECRET_KEY}

@@ -43,3 +43,8 @@ openinference-semantic-conventions
 opentelemetry-api 
 opentelemetry-sdk 
 arize-otel
+
+# Template Render
+jinja2
+
+jsonschema

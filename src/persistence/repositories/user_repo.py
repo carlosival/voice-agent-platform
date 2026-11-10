@@ -3,7 +3,7 @@ from typing import Optional, Tuple
 from sqlalchemy import select, and_
 from sqlalchemy.orm import joinedload, selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
-from src.persistence.models import Agent, UserAgentAssociation, PromptVersion, State, StateFieldAssociations, AgentToolAssociation
+from src.persistence.models import Agent, UserAgentAssociation, PromptVersion, State, AgentToolAssociation
 
 logger = logging.getLogger(__name__)
 
@@ -84,13 +84,9 @@ class UserRepository:
                     )
                     .options(
                         joinedload(UserAgentAssociation.agent).options(
-                            # Agent -> PromptVersion -> State -> fields
+                            # Agent -> PromptVersion -> State 
                             joinedload(Agent.prompt_version).options(
-                                joinedload(PromptVersion.state).options(
-                                    selectinload(State.associated_fields).options(
-                                        joinedload(StateFieldAssociations.field)
-                                    )
-                                )
+                                joinedload(PromptVersion.state)
                             ),
                             # Agent -> tools
                             selectinload(Agent.agent_tools).options(
@@ -108,87 +104,7 @@ class UserRepository:
                 return None
 
             return result
-           
-            '''
-            # Refactor All the code below in a services this repo have 2 responsabilities Retrival the agent and preppared the agent configurations.
-
-            agent = result.agent
-            pv = agent.prompt_version
-            state = pv.state
-
-            base_config = {
-                "agent_id": str(agent.id),
-                "name": agent.name,
-                "strategy": agent.strategy,
-                "tier": result.tier,
-                "regions": list(result.region),
-                "allowed_domains": list(result.allowed_domains),
-                "llm_config": agent.llm_config,
-                "tts_config": agent.tts_config,
-                "stt_config": agent.stt_config,
-                "prompt_version": {
-                    "id": str(pv.id),
-                    "version": pv.version,
-                    "content": pv.content,
-                    "strategy": pv.strategy,
-                    "input_schema": pv.input_schema,
-                    "output_schema": pv.output_schema,
-                },
-                "state_fields": {
-                    a.field.name: {
-                        "type": a.field.type,
-                        "description": a.field.description,
-                        "required": a.required,
-                        "default_value": a.default_value,
-                    }
-                    for a in (state.associated_fields if state else [])
-                },
-                "tools": {
-                    t.tool.name: {
-                        "id": str(t.tool.id),
-                        "name": t.tool.name,
-                        "description": t.tool.description,
-                        "input_schema": t.tool.input_schema,
-                        "output_schema": t.tool.output_schema,
-                        "enabled": True,
-                        "config": t.config,
-                    }
-                    for t in agent.agent_tools
-                    if t.enabled
-                },
-            }
-            base_config = copy.deepcopy(base_config)  # detach from ORM-owned dicts
-
-            override = {
-                k: v
-                for k, v in (result.custom_config_override or {}).items()
-                if k not in PROTECTED_KEYS
-            }
-
-            # Users may only tweak whitelisted attributes of things that already exist
-            if "state_fields" in override:
-                override["state_fields"] = _filter_keyed_override(
-                    override["state_fields"], base_config["state_fields"], OVERRIDABLE_STATE_ATTRS
-                )
-            if "tools" in override:
-                override["tools"] = _filter_keyed_override(
-                    override["tools"], base_config["tools"], OVERRIDABLE_TOOL_ATTRS
-                )
-
-            # Recursive merge: nested dicts merge, scalars and lists are replaced
-            merged = _deep_merge(base_config, override)
-
-            # Drop tools the user disabled; keep the dict shape
-            merged["tools"] = {
-                name: tool for name, tool in merged["tools"].items() if tool.get("enabled", True)
-            }
-
-            logger.info(
-                "Loaded agent config",
-                extra={"agent_id": str(agent_uuid), "public_key_id": str(public_key_uuid)},
-            )
-            return merged          
-        '''     
+                
         except Exception as e:
             logger.error(f"Error checking user agent authorization: {e}")
             return None

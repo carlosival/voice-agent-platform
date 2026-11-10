@@ -174,10 +174,11 @@ async def call_llm_stream_openai(
                 tool_calls = getattr(delta, "tool_calls", None) or []
 
                 if token:
-                
+                    # Analize here if str token are from other types like code_block or struct_output, reasoning, etc
                     accumulated_text += token    
                     yield {"event": "token", "data": token}
 
+                
                 for tc in tool_calls:
 
                     idx = tc.index

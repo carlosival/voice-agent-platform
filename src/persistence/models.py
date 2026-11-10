@@ -129,8 +129,6 @@ class UserPublicKey(Base):
     )
 
 
-
-
 class Tool(Base):
     __tablename__ = "tools"
 
@@ -147,7 +145,6 @@ class Tool(Base):
     input_schema: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
 
     output_schema: Mapped[dict] = mapped_column(JSONB, nullable=True, server_default=text("'{}'::jsonb"))
-
 
 
 class AgentToolAssociation(Base):
@@ -191,8 +188,6 @@ class AgentToolAssociation(Base):
     )
 
     tool: Mapped["Tool"] = relationship("Tool")
-
-
 
 
 class Prompt(Base):
@@ -289,6 +284,8 @@ class State(Base):
             unique=True,
         )
 
+        state_schema: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+
         created_at: Mapped[datetime] = mapped_column(
             DateTime(timezone=True),
             server_default=func.now(),
@@ -300,83 +297,6 @@ class State(Base):
             back_populates="state",
         )
 
-        associated_fields: Mapped[list["StateFieldAssociations"]] = relationship(
-            "StateFieldAssociations",
-            back_populates="state",
-            cascade="all, delete-orphan",
-            
-        )
-
-
-class StateFieldAssociations(Base):
-    __tablename__ = "state_fields_associations"
-
-    __table_args__ = (
-        UniqueConstraint(
-            "state_id",
-            "field_id",
-            name="uq_state_definition_field",
-        ),
-    )
-
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
-        primary_key=True,
-        default=uuid.uuid4,
-    )
-
-    state_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey("states.id", ondelete="CASCADE"),
-        nullable=False,
-    )
-
-    field_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey("fields.id", ondelete="CASCADE"),
-        nullable=False,
-    )
-
-    # Configuration of this field within this particular definition
-    required: Mapped[bool] = mapped_column(
-        Boolean,
-        nullable=False,
-        default=False,
-    )
-
-    
-    state: Mapped["State"] = relationship(
-        "State",
-        back_populates="associated_fields",
-    )
-
-    field: Mapped["Field"] = relationship("Field",)
-
-
-class Field(Base):
-    __tablename__ = "fields"
-
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
-        primary_key=True,
-        default=uuid.uuid4,
-    )
-
-    name: Mapped[str] = mapped_column(
-        String(100),
-        nullable=False,
-        unique=True,
-    )
-
-    type: Mapped[str] = mapped_column(
-        String(50),
-        nullable=False,
-    )
-
-    description: Mapped[str | None] = mapped_column(
-        Text,
-        nullable=True,
-    )
-
-    
+       
+   
 

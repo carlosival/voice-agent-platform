@@ -44,6 +44,7 @@ COPY src/clients/ ./src/clients/
 COPY src/pipelines/ ./src/pipelines/
 COPY src/services/ ./src/services/
 COPY src/persistence/ ./src/persistence/
+COPY src/utils/ ./src/utils/
 
 # Copy the core gateway service code into /app/gateway
 COPY gateway/ ./gateway/

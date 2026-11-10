@@ -26,11 +26,13 @@ class AudioOutputTrack(MediaStreamTrack):
 
     def __init__(self):
         super().__init__()
-        self._queue     = asyncio.Queue(maxsize=100)
+        self._queue     = asyncio.Queue()
         self._timestamp = 0
         self._start     = None
         self._ended     = False
 
+
+    
 
     async def add_silence(self, duration_frames: int = 15):
         """
@@ -127,7 +129,7 @@ class AudioOutputTrack(MediaStreamTrack):
         all buffered frames instantly.
         """
         items_dropped = self._queue.qsize()
-        self._queue = asyncio.Queue(maxsize=50) 
+        self._queue = asyncio.Queue() 
         logger.info(f"AudioOutputTrack: Cleared {items_dropped} frames from buffer.")
 
     

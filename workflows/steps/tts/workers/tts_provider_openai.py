@@ -1,9 +1,11 @@
 import logging
 import httpx
 import asyncio
+from yaafpy.types import ExecContext, WorkflowAbortException
 from workflows.steps.outputs import AudioConverter, get_tts_provider_format, get_output_format
 from workflows.steps.tts.utils import call_tts_stream, build_payload
 from workflows.steps.outputs.audio_output import IAudioOutput
+from workflows.signals import SignalFrame, WarmUp, AskUserStillThere, EndOfStream, StartSpeaking
 
 import logging 
 
@@ -31,7 +33,17 @@ async def tts_worker(
         while True:
             try:
                 text = await tts_queue.get()
-                
+        
+                if isinstance(text, EndOfStream):
+
+                    # Improve this method wait for the Transport 
+                    # publish the end of audioplayback and close the stream (Refactor Later)
+                    #await asyncio.sleep(2)
+                    output_track.stop()
+                    # This is critical for yaafpy
+                    # raise WorkflowAbortException("End of stream.")
+
+
                 if text is None:
                     # End of the CONTINUOUS audio stream.
                     pcm = converter.flush()
@@ -61,7 +73,8 @@ async def tts_worker(
                     if destination_chunk.size:
                         await output_track.write(destination_chunk)
 
-                        
+            except WorkflowAbortException:
+                raise            
             except asyncio.CancelledError:
                 # Still vital for barge-in!
                 logger.debug("TTS Worker: Cancelled (Barge-in).", exc_info=True)
@@ -70,3 +83,4 @@ async def tts_worker(
                 logger.error(f"TTS Worker Error: {e}",exc_info=True)
 
     
+            

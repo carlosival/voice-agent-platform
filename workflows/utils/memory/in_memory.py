@@ -1,4 +1,5 @@
 from typing import List, Dict, Optional
+from ..tools import ToolResult, ToolCallChunk
 from .interfaces import IMemory
 import asyncio
 
@@ -24,50 +25,33 @@ class InMemoryMemory(IMemory):
             raise ValueError("action must be a non-empty string")
         await self._add_message("assistant", message, action)
 
-    async def add_tool_result(self, tool_result: Dict[str, str]) -> None:
-        if not tool_result or not isinstance(tool_result, dict):
-            raise ValueError("tool_result must be a dictionary")
-
-        idetf = tool_result.get("id", None)
+    async def add_tool_result(self, tool_result: ToolResult) -> None:
+        
+        idetf = tool_result.get("id")
         result = tool_result.get("result", None)
-        error = tool_result.get("error", None)
+        error = tool_result.get("error" , None)
 
-        if not idetf or not isinstance(idetf, str):
-            raise ValueError("tool_result must have an id")
-        if not result and not error:
-            raise ValueError("tool_result must have a result or error")
         if result:
-            entry = {"role": "tool", "tool_call_id": idetf, "result": result}    
+            entry = {"role": "tool", "tool_call_id": idetf, "result": str(result)}    
             async with self.lock:
                 self.in_memory.append(entry)
                 return
         if error:
             logger.error(f"Error in tool {idetf}: {error}")
             
-    async def add_tools_results(self, tool_results: List[Dict[str, str]]) -> None:
-        if not tool_results or not isinstance(tool_results, list):
-            raise ValueError("tool_results must be a non-empty list")
+    async def add_tools_results(self, tool_results: list[ToolResult]) -> None:
+        
         for tool_result in tool_results:
             await self.add_tool_result(tool_result)
     
-    async def add_tools_calls(self, tool_calls: List[Dict[str, str]]) -> None:
-        if not tool_calls or not isinstance(tool_calls, list):
-            raise ValueError("tool_calls must be a non-empty list")
-        for tool_call in tool_calls:
-            if not tool_call or not isinstance(tool_call, dict):
-                raise ValueError("tool_call must be a dictionary")
-            if "id" not in tool_call or not isinstance(tool_call["id"], str):
-                raise ValueError("tool_call must have an id")
-            if "name" not in tool_call or not isinstance(tool_call["name"], str):
-                raise ValueError("tool_call must have a name")
-            if "arguments" not in tool_call or not isinstance(tool_call["arguments"], str):
-                raise ValueError("tool_call must have arguments")
+    async def add_tools_calls(self, tool_calls: list[ToolCallChunk]) -> None:
+        
         entrys = [{
-            "id": tc["id"],        #🔒  must be "id"  (matched by tool result below)
+            "id": tc.id,        #🔒  must be "id"  (matched by tool result below)
             "type": "function",   #🔒  must be "function" (only supported type)
             "function": {         #🔒  must be "function"
-                "name": tc["name"],       #🔒  must be "name"
-                "arguments": tc["arguments"], # 🔒  must be "arguments" (JSON string)
+                "name": tc.name,       #🔒  must be "name"
+                "arguments": tc.arguments, # 🔒  must be "arguments" (JSON string)
             },
         } for tc in tool_calls] 
         async with self.lock:

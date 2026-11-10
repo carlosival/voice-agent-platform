@@ -169,109 +169,112 @@ async def call_tts_stream(
     first_audio_ns = None
     total_audio_bytes = 0
 
-    with tracer.start_as_current_span("tts.transcribe", context=parent_ctx) as span:
+    span = tracer.start_span("tts.transcribe", context=parent_ctx)
+
+    
         
-        span.set_attribute(
-            SpanAttributes.OPENINFERENCE_SPAN_KIND,
-            OpenInferenceSpanKindValues.CHAIN.value,
-        )
+    span.set_attribute(
+        SpanAttributes.OPENINFERENCE_SPAN_KIND,
+        OpenInferenceSpanKindValues.CHAIN.value,
+    )
 
-        span.set_attribute(SpanAttributes.INPUT_VALUE, text)
-        span.set_attribute(SpanAttributes.OUTPUT_VALUE, path)
-        span.set_attribute(SpanAttributes.OUTPUT_MIME_TYPE, WAV_MIME)
+    span.set_attribute(SpanAttributes.INPUT_VALUE, text)
+    span.set_attribute(SpanAttributes.OUTPUT_VALUE, path)
+    span.set_attribute(SpanAttributes.OUTPUT_MIME_TYPE, WAV_MIME)
 
-        try:
-            with wave.open(str(path), "wb") as wav_file:
-                wav_file.setnchannels(tts_provider_format.channels)
-                wav_file.setsampwidth(tts_provider_format.sample_width)  # PCM S16LE check the encoding
-                wav_file.setframerate(tts_provider_format.sample_rate)
+    try:
+        with wave.open(str(path), "wb") as wav_file:
+            wav_file.setnchannels(tts_provider_format.channels)
+            wav_file.setsampwidth(tts_provider_format.sample_width)  # PCM S16LE check the encoding
+            wav_file.setframerate(tts_provider_format.sample_rate)
 
-                
-                # 1. Speaches, Groq, OpenAI, etc. requires an Authorization header with your API key
-                headers = {
-                    "Authorization": f"Bearer {api_key}"
-                }
+            
+            # 1. Speaches, Groq, OpenAI, etc. requires an Authorization header with your API key
+            headers = {
+                "Authorization": f"Bearer {api_key}"
+            }
 
-                # API Request
-                # Note: Use response_format="pcm" for raw data to avoid manual header stripping
-                async with http_client.stream(
-                    "POST",
-                    f"{base_url}/v1/audio/speech",
-                    headers=headers,  # ← Added headers
-                    json=payload,
-                    timeout=httpx.Timeout(timeout=None, connect=5.0)
-                ) as resp:
-                    resp.raise_for_status()
-                    decided_wav = None
-                    async for chunk in resp.aiter_bytes():
-                        if not chunk:
-                            break
-                        # Stripe wav header     
-                        if header_stripped:
-                            out = chunk
-                        else:
-                            buffer += chunk
-                            out = None
+            # API Request
+            # Note: Use response_format="pcm" for raw data to avoid manual header stripping
+            async with http_client.stream(
+                "POST",
+                f"{base_url}/v1/audio/speech",
+                headers=headers,  # ← Added headers
+                json=payload,
+                timeout=httpx.Timeout(timeout=None, connect=5.0)
+            ) as resp:
+                resp.raise_for_status()
+                decided_wav = None
+                async for chunk in resp.aiter_bytes():
+                    if not chunk:
+                        break
+                    # Stripe wav header     
+                    if header_stripped:
+                        out = chunk
+                    else:
+                        buffer += chunk
+                        out = None
 
-                            if decided_wav is None and len(buffer) >= WAV_MIN_HEADER_PROBE:
-                                decided_wav = (
-                                    buffer[0:4] == b"RIFF"
-                                    and buffer[8:12] == b"WAVE"
-                                )
-                                if decided_wav is False:
-                                    out = buffer
-                                    buffer = b""
-                                    header_stripped = True
-
-                            if decided_wav and not header_stripped:
-                                if len(buffer) > MAX_HEADER_SEARCH_BYTES:
-                                    raise ValueError(
-                                        "Could not locate 'data' subchunk within "
-                                        f"{MAX_HEADER_SEARCH_BYTES} bytes — malformed WAV header"
-                                    )
-                                data_offset, fmt = _find_wav_data_offset(buffer)
-                                if data_offset is not None:
-                                    if fmt is None:
-                                        raise ValueError(
-                                            "WAV stream reached 'data' subchunk without "
-                                            "a preceding 'fmt ' subchunk — cannot validate format"
-                                        )
-                                    _validate_wav_fmt(fmt, sample_rate)
-                                    out = buffer[data_offset:]
-                                    buffer = b""
-                                    header_stripped = True
-
-                            if not out:
-                                continue
-
-
-                        now_ns = time.perf_counter_ns()
-
-                        if first_audio_ns is None:
-                            first_audio_ns = now_ns
-                            span.set_attribute(
-                                "tts.time_to_first_audio_ms",
-                                (first_audio_ns - tts_start_ns) / 1_000_000,
+                        if decided_wav is None and len(buffer) >= WAV_MIN_HEADER_PROBE:
+                            decided_wav = (
+                                buffer[0:4] == b"RIFF"
+                                and buffer[8:12] == b"WAVE"
                             )
+                            if decided_wav is False:
+                                out = buffer
+                                buffer = b""
+                                header_stripped = True
 
-                        total_audio_bytes += len(out)
-                        
-                        wav_file.writeframesraw(out)  # Append to the same WAV file
-                        yield out
-                        
-        finally:
-            # Runs on normal completion, exceptions, and generator closure.
-            tts_end_ns = time.perf_counter_ns()
-            span.set_attribute(
-                "tts.total_duration_ms",
-                (tts_end_ns - tts_start_ns) / 1_000_000,
-            )
-            span.set_attribute("tts.audio_bytes", total_audio_bytes)
+                        if decided_wav and not header_stripped:
+                            if len(buffer) > MAX_HEADER_SEARCH_BYTES:
+                                raise ValueError(
+                                    "Could not locate 'data' subchunk within "
+                                    f"{MAX_HEADER_SEARCH_BYTES} bytes — malformed WAV header"
+                                )
+                            data_offset, fmt = _find_wav_data_offset(buffer)
+                            if data_offset is not None:
+                                if fmt is None:
+                                    raise ValueError(
+                                        "WAV stream reached 'data' subchunk without "
+                                        "a preceding 'fmt ' subchunk — cannot validate format"
+                                    )
+                                _validate_wav_fmt(fmt, sample_rate)
+                                out = buffer[data_offset:]
+                                buffer = b""
+                                header_stripped = True
 
-            if first_audio_ns is None:
-                span.set_attribute("tts.audio_produced", False)
-            else:
-                span.set_attribute("tts.audio_produced", True)
+                        if not out:
+                            continue
+
+
+                    now_ns = time.perf_counter_ns()
+
+                    if first_audio_ns is None:
+                        first_audio_ns = now_ns
+                        span.set_attribute(
+                            "tts.time_to_first_audio_ms",
+                            (first_audio_ns - tts_start_ns) / 1_000_000,
+                        )
+
+                    total_audio_bytes += len(out)
+                    
+                    wav_file.writeframesraw(out)  # Append to the same WAV file
+                    yield out
+                    
+    finally:
+        # Runs on normal completion, exceptions, and generator closure.
+        tts_end_ns = time.perf_counter_ns()
+        span.set_attribute(
+            "tts.total_duration_ms",
+            (tts_end_ns - tts_start_ns) / 1_000_000,
+        )
+        span.set_attribute("tts.audio_bytes", total_audio_bytes)
+
+        if first_audio_ns is None:
+            span.set_attribute("tts.audio_produced", False)
+        else:
+            span.set_attribute("tts.audio_produced", True)
+        span.end()    
 
 # ─── Test ─────────────────────────────────────────────────────────────────────
 # docker exec -it -e TTS_BASE_URL="http://speaches:8000" -e TTS_MODEL="speaches-ai/piper-es_ES-sharvard-medium" -e TTS_VOICE="sharvard" fastapi python3 -m utils.text_to_speech

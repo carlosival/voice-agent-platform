@@ -7,7 +7,7 @@ QUEUE_BACKPRESSURE_MAXSIZE = 10
 START_SECS   = 0.2   # confirmed speech after this long
 CONFIRM_TURN_SEC = 0.2   # Explore turn detection
 STOP_SECS    = 0.6   # confirmed absolute silence after this long
-FRAME_SECS   = 0.032  # 20ms per aiortc frame
+FRAME_SECS   = 0.032 
 INACTIVITY_SECS = 60 # 60 seconds At this point the agent will ask the user still there?
 VAD_CHUNK_SAMPLES = 512 # 16KHz F32SLE 512 Samples are 32ms or 0.032s and 2048 bytes 
 

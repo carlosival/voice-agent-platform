@@ -1,5 +1,8 @@
 
 from typing import Protocol, List, Dict
+from ..tools import ToolCallChunk, ToolResult
+
+# Fix and check all function signature
 
 class IMemory(Protocol):
     
@@ -10,7 +13,10 @@ class IMemory(Protocol):
         ...
         
 
-    async def add_tools_results(self, result: str, tool_call_id: str)-> bool:
+    async def add_tools_results(self, results: List[ToolResult], tool_call_id: str)-> bool:
+        ...
+
+    async def add_tools_calls(self, tools_calls: List[ToolCallChunk])-> None:
         ...
 
     async def get_messages(self) -> List[Dict[str, str]]:

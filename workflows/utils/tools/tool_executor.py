@@ -1,7 +1,7 @@
 import json, time, asyncio
-from typing import TypedDict, Dict, Optional
+from typing import TypedDict, Dict, Optional, Any
 from smolagents import Tool, PythonInterpreterTool, FinalAnswerTool
-from .tool_types import ToolCallChunk
+from .tool_types import ToolCallChunk, ToolResult
 from opentelemetry.trace import Status, StatusCode, set_span_in_context
 
 from openinference.semconv.trace import (
@@ -18,7 +18,7 @@ TOOL_REGISTRY: dict[str, Tool] = {}
 import logging
 logger = logging.getLogger(__name__)
 
-async def execute_tool(tc: ToolCallChunk, registry: Dict[str, Tool] = TOOL_REGISTRY, tracing_data:Optional[dict] = None) -> Dict[str, str]:
+async def execute_tool(tc: ToolCallChunk, registry: Dict[str, Tool] = TOOL_REGISTRY, tracing_data:Optional[dict] = None) -> ToolResult:
     
     parent_span = tracing_data["parent_span"]
     tracer = tracing_data["tracer"]
