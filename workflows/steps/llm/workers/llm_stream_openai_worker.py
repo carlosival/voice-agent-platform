@@ -24,6 +24,18 @@ BAD_PATTERNS = [
             r"`{1,3}.*?`{1,3}",      # Code snippets
         ]
 
+DOT_TERMINATORS = {".", "…", "。"}
+
+TRAILING_EMAIL_OR_DOMAIN_RE = re.compile(
+    r"(?:"
+    r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}"   # e.g. user.name@domain.com
+    r"|https?://\S+"                                       # e.g. https://example.com
+    r"|\b[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+(?:/\S*)?"       # e.g. sub.domain.es or example.com
+    r"|\b\d+\.\d+"                                         # e.g. 3.14 or 10.5
+    r")\.?$",
+    re.IGNORECASE,
+)
+
 def sanitize_sentence(text: str) -> str:
         """
         Cleans up a complete sentence before handing it to the TTS engine.
@@ -44,6 +56,27 @@ def sanitize_sentence(text: str) -> str:
         cleaned = re.sub(r"\s+", " ", cleaned).strip()
         
         return cleaned
+
+def is_sentence_boundary(buffer: str, min_chars: int = 25) -> bool:
+    stripped = buffer.strip()
+    if not stripped or len(stripped) < min_chars:
+        return False
+
+    # Newlines, question/exclamation marks, etc. are safe boundaries once min_chars is met
+    if stripped[-1] in SENTENCE_ENDS:
+        return True
+
+    # For a trailing dot, avoid flushing if it belongs to an email, domain, URL, or decimal
+    if stripped[-1] in DOT_TERMINATORS:
+        if not buffer.endswith((" ", "\t", "\n", "\r")):
+            return False
+
+        if TRAILING_EMAIL_OR_DOMAIN_RE.search(stripped):
+            return False
+
+        return True
+
+    return False
 
 
 '''
@@ -159,7 +192,7 @@ async def call_llm_stream_openai_worker(
                     # You can work with allucination mesuare here, per valuable chunks of data.
                     buffer   += data
                     
-                    if buffer.rstrip() and buffer.rstrip()[-1] in SENTENCE_ENDS:
+                    if is_sentence_boundary(buffer, min_chars=25):
                             logger.info(f"[llm_stream] Flushing sentence: '{buffer.strip()}'")
                             raw_sentence = buffer.strip()
                 
@@ -286,6 +319,22 @@ async def call_llm_stream_openai_worker(
 
         except asyncio.CancelledError as cancel_error:
             logger.info("[llm_stream] Cancelled by signal.")
+            
+            parent_span = (tracing_data or {}).get("parent_span")
+            partial_output = (full_response + buffer).strip()
+
+            if parent_span is not None and parent_span.is_recording():
+                parent_span.add_event(
+                    name="llm_worker.barge_in_cancelled",
+                    attributes={
+                        "barge_in.occurred": True,
+                        "llm.model": model or "",
+                        "llm.partial_response_chars": len(partial_output),
+                        "llm.partial_response": partial_output[:1000],  # guard payload size
+                        "llm.pending_tool_calls": len(tool_calls_acc),
+                    },
+                )
+                parent_span.set_attribute("barge_in.occurred", True)
             sentence_queue.put_nowait(cancel_error)
         except Exception as e:
             logger.error(f"[llm_stream] Unexpected error in worker: {e}", exc_info=1)

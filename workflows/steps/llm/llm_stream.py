@@ -2,6 +2,7 @@ from typing import Dict, AsyncGenerator
 from .workers import call_llm_stream_openai_worker, get_llm_provider_worker, get_provider_url, extract_state_updates
 from workflows.signals import SignalFrame, WarmUp, AskUserStillThere, EndOfStream, StartSpeaking
 from workflows.utils.tools import Tool
+from workflows.utils.context.prompts.prompt_render import render_prompt
 from opentelemetry.trace import Span, Status, StatusCode, set_span_in_context
 from yaafpy.types import ExecContext
 import logging, asyncio, os
@@ -17,7 +18,7 @@ from openinference.semconv.trace import (
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-EXTRACTOR_MODEL="gpt-oss-20b"
+EXTRACTOR_MODEL="openai/gpt-oss-20b"
 EXTRACTOR_LLM_KEY = os.getenv("EXTRACTOR_LLM_KEY", None)
 EXTRACTOR_LLM_PROVIDER = "groq"
 
@@ -38,6 +39,8 @@ async def llm_stream(
     message_history: InMemoryMemory = ctx.shared_data["message_history"]
     tools: dict[str, Tool] = ctx.shared_data.get("tools", {}) # Dict[str, Tool] smolagent
     system_prompt = ctx.shared_data.get("system_prompt", "")
+    prompt_template = ctx.shared_data.get("prompt",{}).get("template", "")
+    prompt_input = ctx.shared_data.get("prompt",{}).get("input", "")
     provider_name = ctx.shared_data["llm_config"]["engine"]
     provider_url = get_provider_url(provider_name)
     model = ctx.shared_data["llm_config"]["model"]
@@ -47,7 +50,7 @@ async def llm_stream(
 
     state_config = ctx.shared_data.get("state", None)
     state_schema =  state_config.get("schema", None) if state_config else None
-    state =state_config.get("value", None) if state_config else None
+    state = state_config.get("value", None) if state_config else None
     state_task = None
 
     turn_trace = None
@@ -76,6 +79,22 @@ async def llm_stream(
             
             if isinstance(item, StartSpeaking):
                 logger.info(" [INTERRUPT] llm_stream received StartSpeaking. Cancelling current LLM task.")
+                was_generating = current_task is not None and not current_task.done()
+                logger.info(
+                    "[INTERRUPT] llm_stream received StartSpeaking. was_generating=%s",
+                    was_generating,
+                )
+
+                if turn_trace is not None and turn_trace.is_recording():
+                    turn_trace.add_event(
+                        name="user.start_speaking",
+                        attributes={
+                            "barge_in.interrupted_llm": was_generating,
+                        },
+                    )
+                    if was_generating:
+                        turn_trace.set_attribute("barge_in.occurred", True)
+
                 if current_task:
                     current_task.cancel()
                     await asyncio.gather(current_task, return_exceptions=True)
@@ -111,7 +130,8 @@ async def llm_stream(
                         state_task = asyncio.create_task(
                             extract_state_updates(
                                 user_text=item,
-                                current_state=state,
+                                current_state=state, # Dark pattern state is update in place inside the worker.
+                                memory=message_history,
                                 state_schema=state_schema,
                                 http_client=http_client,
                                 provider_url=get_provider_url(EXTRACTOR_LLM_PROVIDER),
@@ -127,7 +147,12 @@ async def llm_stream(
                 with tracer.start_as_current_span("llm.tool_loop", context=parent_ctx) as span:
                     span.set_attribute(SpanAttributes.INPUT_VALUE, item)
                     # The extra function to call for a llm provider bring flexibility at runtime
+                    
                     # It allows to add new providers it one is down 
+                    if state: 
+                        # is a dinamic prompt recalculate the template with the current_state
+                        system_prompt = render_prompt(prompt_template, state, prompt_input)
+                        
                     current_task = asyncio.create_task(get_llm_provider_worker(provider_name, model)(
                                                 text=item,
                                                 memory=message_history, 
@@ -168,6 +193,11 @@ async def llm_stream(
                                 
                                 # The extra function to call for a llm provider bring flexibility at runtime
                                 # It allows to add new providers it one is down or not available  
+
+                                if state: 
+                                    # is a dinamic prompt recalculate the template with the current_state
+                                    system_prompt = render_prompt(prompt_template, state, prompt_input)
+
                                 current_task = asyncio.create_task(get_llm_provider_worker(provider_name, model)(
                                                 text=item,
                                                 memory=message_history, 
@@ -207,7 +237,8 @@ async def llm_stream(
                                 logger.info(f"LLM: Exception in worker: {item_from_queue}")
                                 yield "Lo siento, tuve un problema técnico al procesar su pregunta."
                                 break
-                            
+
+                            # Refactor Tengo mis dudas sobre este branch si es correcto, Investigar
                             if isinstance(item_from_queue, asyncio.CancelledError):
                                 logger.info("LLM: Loop cancelled during barge-in.")
                                 # Remove Last user question without reply to prevent history pollution

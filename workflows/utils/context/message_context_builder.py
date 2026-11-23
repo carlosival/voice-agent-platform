@@ -1,6 +1,6 @@
 from workflows.utils.memory import IMemory  
 
-def _extract_messages(self, messages: list) -> str:
+def _extract_messages(messages: list) -> str:
         """Build conversation context from messages"""
         try:
             context_parts = []
@@ -14,6 +14,25 @@ def _extract_messages(self, messages: list) -> str:
         except Exception as e:
             logger.error(f"Error building context: {e}")
             return ""
+
+
+def _extract_context_and_user_text(messages: list[dict], max_history_msgs: int = 6) -> tuple[str, str]:
+    # Find index of the latest user message
+    last_user_idx = next(
+        (i for i in range(len(messages) - 1, -1, -1) if messages[i].get("role") == "user"),
+        None,
+    )
+    if last_user_idx is None:
+        return "", ""
+
+    latest_user_text = (messages[last_user_idx].get("content") or "").strip()
+
+    # Take up to `max_history_msgs` messages BEFORE the latest user message
+    start_idx = max(0, last_user_idx - max_history_msgs)
+    prior_msgs = messages[start_idx:last_user_idx]
+
+    formatted_turns = _extract_messages(prior_msgs)
+    return formatted_turns, latest_user_text
 
 async def build_chat_messages(memory: IMemory, system_prompt: str, user_input: str = None) -> list:
     """

@@ -20,7 +20,6 @@ from src.persistence.models import (
     Prompt,
     PromptVersion,
     State,
-    StateFieldAssociations,
     Field,
 )
 

@@ -97,6 +97,22 @@ async def tts_stream(
             if isinstance(sentence, StartSpeaking):
                 logger.info("[AUDIO_KILL] TTS received StartSpeaking. Purging output track.")
 
+                was_generating = current_task is not None and not current_task.done()
+                logger.info(
+                    "[INTERRUPT] tts_stream received StartSpeaking. was_generating=%s",
+                    was_generating,
+                )
+
+                if turn_trace is not None and turn_trace.is_recording():
+                    turn_trace.add_event(
+                        name="user.start_speaking",
+                        attributes={
+                            "barge_in.interrupted_tts": was_generating,
+                        },
+                    )
+                    if was_generating:
+                        turn_trace.set_attribute("barge_in.occurred", True)
+
                 
                 # Clear pending sentences
                 while not tts_queue.empty():

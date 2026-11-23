@@ -14,6 +14,7 @@ async def vad_backpressure_input(source: AsyncGenerator, queue: asyncio.Queue):
     frame_count = 0
     try:
         async for frame in source:
+                '''
                 frame_count += 1
                 if frame_count % 100 == 0:
                     logger.info(
@@ -25,7 +26,7 @@ async def vad_backpressure_input(source: AsyncGenerator, queue: asyncio.Queue):
                             f"sample_rate={frame.sample_rate} | "
                             f"samples={frame.samples} | "
                     )
-
+                '''
                 # ---- Defensive: make sure it's actually an audio frame ----
                 if not isinstance(frame, AudioFrame):
                     logger.warning(f"VAD: expected AudioFrame, got {type(frame)!r}, skipping")

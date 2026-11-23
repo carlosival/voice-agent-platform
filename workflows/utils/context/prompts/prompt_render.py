@@ -37,9 +37,19 @@ def wrap(value, path=""):
     return value
 
 
-def render_prompt(template: str, state: dict) -> str:
-    context = {**wrap(state), "state": wrap(state, "state")}
+def render_prompt(template: str, state: dict = None, input_values:dict = None) -> str:
+    
+    state = state or {}
+    input_values = input_values or {}
+
+    context = {
+        **wrap(state),
+        "state": wrap(state, "state"),
+        **wrap(input_values),
+        "input": wrap(input_values, "input"),
+    }
     return Template(template, undefined=KeepUndefined).render(context)
+
 
 
 if __name__ == "__main__":

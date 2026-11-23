@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Generatal Bussines Info",
+  "description": "General BUssiness Info with location and time awareness",
+  "type": "object",
+  "properties": {
+    "name": {
+      "type": "string",
+      "description": "Bussines's name"
+    }
+    
+  },
+  "required": [
+    "name"
+  ]
+}

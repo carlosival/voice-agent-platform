@@ -10,7 +10,21 @@ from pathlib import Path
     JSON Schema will be uses for all Workers through deps providers to Provide the ExecContext and run the workflows.
 '''
 
+checker = FormatChecker()
+original_datetime = checker.checkers["date-time"][0]
+original_date = checker.checkers["date"][0]
 
+@checker.checks("date-time", raises=ValueError)
+def check_datetime(value):
+    if value == "now":
+        return True
+    return original_datetime(value)
+
+@checker.checks("date", raises=ValueError)
+def check_date(value):
+    if value == "now":
+        return True
+    return original_date(value)
 
 SCHEMA_VERSION = 1
 
@@ -117,6 +131,7 @@ def build_agent_config(assoc) -> dict[str, Any]:
         tools[tool.name] = {
             "id": str(tool.id),
             "description": tool.description,
+            "provider": tool.provider,
             "parameters": copy.deepcopy(tool.input_schema),
             "output_schema": copy.deepcopy(tool.output_schema) or {},
             "config": config,  # runtime settings, never sent to the LLM
@@ -195,7 +210,7 @@ def validate_agent_config(
 
     validator = Draft202012Validator(
         schema,
-        format_checker=FormatChecker()
+        format_checker=checker # This checker is customize to accept now as a valid date time format
     )
 
     errors = sorted(

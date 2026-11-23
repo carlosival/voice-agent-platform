@@ -231,6 +231,21 @@ async def call_llm_stream_openai(
         # User barged in (task cancelled) or the consumer stopped iterating.
         logger.info("[LLM Engine] Stream cut short by user barge-in.")
         interrupted = True
+        
+        
+        span.add_event(
+        name="llm_api_call.barge_in",
+        attributes={
+            "barge_in.occurred": True,
+            "llm.model": model or "",
+            "llm.partial_response_chars": len(accumulated_text),
+            "llm.partial_response": accumulated_text[:1000],  # guard payload size
+            "llm.pending_tool_calls": len(accumulated_tools),
+        },
+        )
+        span.set_attribute("barge_in.occurred", True)
+
+        span.set_status(Status(StatusCode.OK, "Cancelled due to barge-in"))
         raise  # must re-raise for proper pipeline task cleanup
     except Exception as e:
         logger.error(f"Error calling LLM: {e}")

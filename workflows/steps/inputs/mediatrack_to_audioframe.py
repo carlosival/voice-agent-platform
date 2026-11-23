@@ -26,7 +26,7 @@ async def track_frames(track: MediaStreamTrack) -> AsyncGenerator[av.AudioFrame,
             try:
                 frame = await asyncio.wait_for(track.recv(), timeout=WAIT_FOR_TIMEOUT)
                 frame_count += 1
-
+                '''
                 if frame_count % 100 == 0:  # inspect mod 100 frames only
                     arr = frame.to_ndarray()
                     logger.info(
@@ -45,7 +45,7 @@ async def track_frames(track: MediaStreamTrack) -> AsyncGenerator[av.AudioFrame,
 
                 if frame_count % 100 == 0:
                     logger.info(f"Track received frame {frame_count}")
-                
+                '''
                 # 48k stereo -> 16k mono
                 output_frames = resampler.resample(frame)
 

@@ -43,6 +43,16 @@ class VADState(Enum):
 async def vad_gate(source: AsyncGenerator, ctx: ExecContext) -> AsyncGenerator[list[AudioFrame], None]:
 
     conversation_span = ctx.shared_data["trace_context"]["conversation_span"]
+
+
+    logger.info(
+    "conversation_span check: span=%r is_recording=%s ctx=%s",
+    conversation_span,
+    conversation_span.is_recording() if conversation_span else None,
+    conversation_span.get_span_context() if conversation_span else None,
+    )
+
+
     tracer = ctx.shared_data["resources"]["tracer"]
     session_id = str(ctx.shared_data["session_id"])
 
@@ -61,6 +71,22 @@ async def vad_gate(source: AsyncGenerator, ctx: ExecContext) -> AsyncGenerator[l
     turn_count = 0
     end_speech_check = False
     current_turn = None
+
+    turn_context = set_span_in_context(conversation_span)
+                                            
+    current_turn = tracer.start_span(
+                    f"turn.{turn_count}",
+                    context=turn_context,
+                    attributes={
+                        "session.id": session_id,
+                        "turn.id": str(uuid.uuid4()),
+                        "turn.seq": turn_count,
+                    },
+                )
+    yield current_turn
+
+
+
 
     vad_queue: asyncio.Queue[np.ndarray] = asyncio.Queue()
     
@@ -128,6 +154,18 @@ async def vad_gate(source: AsyncGenerator, ctx: ExecContext) -> AsyncGenerator[l
                                     consecutive_silence_counter = 0
                                     ask_user = 0
                                     
+                                    # Record User Start Speaking
+                                    if current_turn is not None and current_turn.is_recording():
+                                        current_turn.add_event(
+                                            name="user.barge_in",
+                                            attributes={
+                                                "session.id": session_id,
+                                                "vad.ended_turn": turn_count,
+                                                "vad.turn_seq_next": turn_count + 1,
+                                            },
+                                        )
+
+
                                     # SIGNAL 1: Signal other process to Stop the workers Barg-IN
                                     yield StartSpeaking()
                                     
@@ -183,13 +221,13 @@ async def vad_gate(source: AsyncGenerator, ctx: ExecContext) -> AsyncGenerator[l
                                             turn_count+=1
                                             
                                             turn_context = set_span_in_context(conversation_span)
-
+                                            '''
                                             turn_context = baggage.set_baggage(
                                                 "turn_sequence",
                                                 turn_count,
                                                 context=turn_context,
                                             )
-                                            
+                                            '''
                                             current_turn = tracer.start_span(
                                                             f"turn.{turn_count}",
                                                             context=turn_context,

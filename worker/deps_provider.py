@@ -103,9 +103,9 @@ class DepProvider:
             tools_registry[key] = cls(cfg)
 
         # 3. Load Prompts
-        system_prompt = render_prompt(agent_config["prompt"]["template"], agent_config["input"])
+        system_prompt = render_prompt(agent_config["prompt"]["template"], agent_config["state"]["value"], agent_config["input"])
         
-        #system_prompt = get_prompt(agent_config.get("llm_config", {}).get("system_prompt", None))
+        logger.info("Initital Prompt with all data in the template: {system_prompt}")
 
         secrets = get_secrets(f"/{pk_id}",["LLM_API_KEY", "STT_API_KEY", "TTS_API_KEY"])
 
@@ -113,6 +113,10 @@ class DepProvider:
         ctx = ExecContext(shared_data={
             "tools": tools_registry, # Add tool related DB ID
             "system_prompt": system_prompt, # Add Prompt Version Related ID
+            "prompt": {
+                "input": agent_config["input"],
+                "template": agent_config["prompt"]["template"]
+            },
             "llm_api_key": secrets[0],
             "stt_api_key": secrets[1],
             "tts_api_key": secrets[2],

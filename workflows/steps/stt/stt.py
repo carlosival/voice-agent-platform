@@ -69,6 +69,22 @@ async def stt_stream(
    
         # If we get a Stop signal, kill the Whisper task immediately
         if isinstance(item, StartSpeaking):
+            was_generating = current_task is not None and not current_task.done()
+            logger.info(
+                "[INTERRUPT] stt_stream received StartSpeaking. was_generating=%s",
+                was_generating,
+            )
+
+            if turn_trace is not None and turn_trace.is_recording():
+                turn_trace.add_event(
+                    name="user.start_speaking",
+                    attributes={
+                        "barge_in.interrupted_stt": was_generating,
+                    },
+                )
+                if was_generating:
+                    turn_trace.set_attribute("barge_in.occurred", True)
+            
             cancel_all_tasks(tasks)
             yield item
 

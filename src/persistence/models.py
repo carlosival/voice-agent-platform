@@ -16,7 +16,7 @@ class Base(DeclarativeBase):
 class Agent(Base):
     __tablename__ = "agents"
     
-    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4, server_default=text("gen_random_uuid()"),)
     name: Mapped[str] = mapped_column(String(100), nullable=False)
     
     # Internal runtime execution strategy.
@@ -60,7 +60,7 @@ class UserAgentAssociation(Base):
     Also stores subscription status or custom tweaks for generic agents."""
     __tablename__ = "user_agent_associations"
 
-    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4, server_default=text("gen_random_uuid()"),)
     
     public_key_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("user_public_keys.id", ondelete="CASCADE")
@@ -97,7 +97,7 @@ class UserAgentAssociation(Base):
 class User(Base):
     __tablename__ = "users"
     
-    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4,server_default=text("gen_random_uuid()"),)
     email: Mapped[str] = mapped_column(String(255), unique=True, index=True, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
     
@@ -109,7 +109,7 @@ class User(Base):
 class UserPublicKey(Base):
     __tablename__ = "user_public_keys"
     
-    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4, server_default=text("gen_random_uuid()"),)
     
     user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     
@@ -136,11 +136,14 @@ class Tool(Base):
         UUID(as_uuid=True),
         primary_key=True,
         default=uuid.uuid4,
+        server_default=text("gen_random_uuid()"),
     )
 
-    name: Mapped[str] = mapped_column(String(100), nullable=False)
+    name: Mapped[str] = mapped_column(String(100), nullable=False, unique=True)
 
     description: Mapped[str] = mapped_column(Text, nullable=False)
+
+    provider: Mapped[str] = mapped_column(String(100), nullable=False, server_default=text("custom"))
 
     input_schema: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
 
@@ -154,6 +157,7 @@ class AgentToolAssociation(Base):
         UUID(as_uuid=True),
         primary_key=True,
         default=uuid.uuid4,
+        server_default=text("gen_random_uuid()"),
     )
 
     agent_id: Mapped[uuid.UUID] = mapped_column(
@@ -197,10 +201,16 @@ class Prompt(Base):
         UUID(as_uuid=True),
         primary_key=True,
         default=uuid.uuid4,
+        server_default=text("gen_random_uuid()"),
     )
 
     name: Mapped[str] = mapped_column(
         String(100),
+        nullable=False,
+    )
+
+    description: Mapped[str] = mapped_column(
+        String(500),
         nullable=False,
     )
 
@@ -218,6 +228,7 @@ class PromptVersion(Base):
         UUID(as_uuid=True),
         primary_key=True,
         default=uuid.uuid4,
+        server_default=text("gen_random_uuid()"),
     )
 
     prompt_id: Mapped[uuid.UUID] = mapped_column(
@@ -240,6 +251,12 @@ class PromptVersion(Base):
 
     # Structured Output Type or simple string 
     output_schema: Mapped[dict] = mapped_column(JSONB,nullable=False,default=dict,)
+
+    template_engine: Mapped[str] = mapped_column(
+        String(50),
+        nullable=False,
+        server_default=text("'jinja'"),
+    )
 
     # Type of prompt (zero shot, CoT, ReAct, etc)
     strategy: Mapped[str] = mapped_column(
@@ -275,6 +292,7 @@ class State(Base):
             UUID(as_uuid=True),
             primary_key=True,
             default=uuid.uuid4,
+            server_default=text("gen_random_uuid()"),
         )
 
         prompt_version_id: Mapped[uuid.UUID] = mapped_column(
