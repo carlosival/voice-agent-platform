@@ -142,6 +142,23 @@ class AudioOutputTrack(MediaStreamTrack):
                 break
         
 
+    async def wait_until_empty(self, poll_interval: float = 0.05) -> None:
+        while not self._ended and not self._queue.empty():
+            await asyncio.sleep(poll_interval)          
+
     def stop(self):
         self._ended = True
         super().stop()
+
+    async def clean_stop(self, timeout: float = 3.0) -> None:
+        try:
+            await asyncio.wait_for(self.wait_until_empty(), timeout=timeout)
+        except asyncio.TimeoutError:
+            logger.warning(
+                "AudioOutputTrack: Timed out after %.1fs waiting for queue to drain"
+                " (%d frames left).",
+                timeout,
+                self._queue.qsize(),
+            )
+        finally:
+            self.stop()

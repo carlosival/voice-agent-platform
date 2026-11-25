@@ -1,6 +1,6 @@
 from typing import Dict, AsyncGenerator
 from .workers import call_llm_stream_openai_worker, get_llm_provider_worker, get_provider_url, extract_state_updates
-from workflows.signals import SignalFrame, WarmUp, AskUserStillThere, EndOfStream, StartSpeaking
+from workflows.signals import SignalFrame, WarmUp, AskUserStillThere, EndOfStream, StartSpeaking, EndOfSentences
 from workflows.utils.tools import Tool
 from workflows.utils.context.prompts.prompt_render import render_prompt
 from opentelemetry.trace import Span, Status, StatusCode, set_span_in_context
@@ -220,6 +220,7 @@ async def llm_stream(
                                 await message_history.add_ai_message(full_response, None) 
                                 span.set_attribute(SpanAttributes.OUTPUT_VALUE, full_response)
                                 # Add output value to the span with status ok
+                                yield EndOfSentences()
                                 break
                             
                             if isinstance(item_from_queue, EndOfStream):

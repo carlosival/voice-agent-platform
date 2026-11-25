@@ -5,7 +5,7 @@ from yaafpy.types import ExecContext, WorkflowAbortException
 from workflows.steps.outputs import AudioConverter, get_tts_provider_format, get_output_format
 from workflows.steps.tts.utils import call_tts_stream, build_payload
 from workflows.steps.outputs.audio_output import IAudioOutput
-from workflows.signals import SignalFrame, WarmUp, AskUserStillThere, EndOfStream, StartSpeaking
+from workflows.signals import SignalFrame, WarmUp, AskUserStillThere, EndOfStream, StartSpeaking, EndOfSentences
 
 import logging 
 
@@ -36,21 +36,20 @@ async def tts_worker(
         
                 if isinstance(text, EndOfStream):
 
-                    # Improve this method wait for the Transport 
-                    # publish the end of audioplayback and close the stream (Refactor Later)
-                    #await asyncio.sleep(2)
-                    output_track.stop()
-                    # This is critical for yaafpy
-                    # raise WorkflowAbortException("End of stream.")
-
-
-                if text is None:
-                    # End of the CONTINUOUS audio stream.
+                    # This wait for the transport to be empty/clean before close the transport 
+                    await output_track.clean_stop()
+                    break
+                    
+                        
+                if text is None or isinstance(text, EndOfSentences):
+                    # End of the CONTINUOUS sentences stream.
+                    # Don't kill the worker return the control to await for more sentences available in the queue
                     pcm = converter.flush()
 
                     if pcm.size:
                         await output_track.write(pcm)
 
+                    # Stop the worker from inside
                     break
                     
                     

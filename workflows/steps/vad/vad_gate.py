@@ -290,6 +290,7 @@ async def vad_gate(source: AsyncGenerator, ctx: ExecContext) -> AsyncGenerator[l
                                     starting_count = 0
                                     stopping_count = 0
                                     consecutive_silence_counter = 0
+                                    silero_reset_states(silero_model)
                 except (GeneratorExit, asyncio.CancelledError):
                     raise                    
                 except:

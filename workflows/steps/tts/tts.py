@@ -5,7 +5,7 @@ from typing import AsyncGenerator
 from yaafpy.types import ExecContext, WorkflowAbortException
 from yaafpy import StreamWorkflow
 from workflows.steps.outputs.audio_output import IAudioOutput
-from workflows.signals import SignalFrame, WarmUp, AskUserStillThere, EndOfStream, StartSpeaking
+from workflows.signals import SignalFrame, WarmUp, AskUserStillThere, EndOfStream, StartSpeaking, EndOfSentences
 from .workers import get_tts_provider_worker
 from .utils import get_tts_provider_url
 from opentelemetry.trace import Span
@@ -60,24 +60,9 @@ async def tts_stream(
     tts_base_url      = get_tts_provider_url(tts_provider_name)
     current_task = None
     tts_queue = asyncio.Queue()
+    was_generating = False
     
     try:
-
-        current_task = asyncio.create_task(
-            get_tts_provider_worker(tts_provider_name)(
-                http_client=http_client, 
-                output_track=output_track, 
-                tts_queue=tts_queue, 
-                provider_name=tts_provider_name, 
-                model=tts_model,
-                voice=tts_voice,
-                language=tts_language,
-                api_key=tts_api_key,
-                base_url=tts_base_url,
-                tracing_data={"tracer": tracer,"parent_span": turn_trace}
-                )
-        )
-
         async for sentence in source:
             if isinstance(sentence, Span):
                 turn_trace = sentence
@@ -85,14 +70,60 @@ async def tts_stream(
             
             if isinstance(sentence, WarmUp):
                 logger.info(f"TTS received WarmUp signal.")
+                if not current_task or current_task.done():
+                    # Create a worker task to synthesize the sentences
+                    tts_queue = asyncio.Queue()
+                    current_task = asyncio.create_task(
+                                                    get_tts_provider_worker(tts_provider_name)(
+                                                        http_client=http_client, 
+                                                        output_track=output_track, 
+                                                        tts_queue=tts_queue, 
+                                                        provider_name=tts_provider_name, 
+                                                        model=tts_model,
+                                                        voice=tts_voice,
+                                                        language=tts_language,
+                                                        api_key=tts_api_key,
+                                                        base_url=tts_base_url,
+                                                        tracing_data={"tracer": tracer,"parent_span": turn_trace}
+                                                        ))
                 await output_track.add_silence(duration_frames=50)
                 await tts_queue.put("¡Hola! ¿Cómo puedo ayudarte?")
+                await tts_queue.put(EndOfSentences())
+                continue
 
             if isinstance(sentence, EndOfStream):
                 logger.info("TTS: EndOfStream received. Cleaning up.")
                 # Optional: Send a goodbye message before killing
+                if not current_task or current_task.done():
+                    # Create a worker task to synthesize the sentences
+                    tts_queue = asyncio.Queue()
+                    current_task = asyncio.create_task(
+                                                    get_tts_provider_worker(tts_provider_name)(
+                                                        http_client=http_client, 
+                                                        output_track=output_track, 
+                                                        tts_queue=tts_queue, 
+                                                        provider_name=tts_provider_name, 
+                                                        model=tts_model,
+                                                        voice=tts_voice,
+                                                        language=tts_language,
+                                                        api_key=tts_api_key,
+                                                        base_url=tts_base_url,
+                                                        tracing_data={"tracer": tracer,"parent_span": turn_trace}
+                                                        ))
                 await asyncio.wait_for(tts_queue.put("¡Hasta luego!"), timeout=2.0) 
-                
+                await asyncio.wait_for(tts_queue.put(EndOfStream()), timeout=2.0)
+                break
+
+            if isinstance(sentence, EndOfSentences):
+                turn_trace.add_event(
+                        name="llm.send_all_sentences for synthesize",
+                        attributes={
+                            "barge_in.interrupted_tts": was_generating,
+                        },
+                )
+                await asyncio.wait_for(tts_queue.put(EndOfSentences()), timeout=2.0)    
+                continue
+
             # 1. SIGNAL HANDLING (The "Kill Switch")
             if isinstance(sentence, StartSpeaking):
                 logger.info("[AUDIO_KILL] TTS received StartSpeaking. Purging output track.")
@@ -114,9 +145,10 @@ async def tts_stream(
                         turn_trace.set_attribute("barge_in.occurred", True)
 
                 
-                # Clear pending sentences
-                while not tts_queue.empty():
-                    tts_queue.get_nowait()
+                #   Clear pending sentences not needed delete next Refactor
+                #   while not tts_queue.empty():
+                #   tts_queue.get_nowait()
+
                 # Cancel whatever is currently synthesizing
                 if current_task and not current_task.done():
                     current_task.cancel()
@@ -125,9 +157,15 @@ async def tts_stream(
                     except asyncio.CancelledError:
                         pass
                 output_track.clear()
+                continue
                 
-                # Restart the worker
-                current_task = asyncio.create_task(
+            # 2. DATA HANDLING (The Sentence)
+            if isinstance(sentence, str):
+                logger.info(f"TTS received sentence: '{sentence}'")
+                if not current_task or current_task.done():
+                    # Create a worker task to synthesize the sentences
+                    tts_queue = asyncio.Queue()
+                    current_task = asyncio.create_task(
                                                     get_tts_provider_worker(tts_provider_name)(
                                                         http_client=http_client, 
                                                         output_track=output_track, 
@@ -140,19 +178,32 @@ async def tts_stream(
                                                         base_url=tts_base_url,
                                                         tracing_data={"tracer": tracer,"parent_span": turn_trace}
                                                         ))
-                continue
-                
 
-            # 2. DATA HANDLING (The Sentence)
-            if isinstance(sentence, str):
-                logger.info(f"TTS received sentence: '{sentence}'")
                 await asyncio.wait_for(tts_queue.put(sentence), timeout=2.0)
+                continue
             
             # 3. ASK USER STILL THERE
             if isinstance(sentence, AskUserStillThere):
                 logger.info("TTS received AskUserStillThere signal.")
-                if tts_queue.empty():
-                    await asyncio.wait_for(tts_queue.put("¿Te puedo ayudar en algo más?"), timeout=2.0)
+
+                if not current_task or current_task.done():
+                    # Create a worker task to synthesize the sentences
+                    tts_queue = asyncio.Queue()
+                    current_task = asyncio.create_task(
+                                                    get_tts_provider_worker(tts_provider_name)(
+                                                        http_client=http_client, 
+                                                        output_track=output_track, 
+                                                        tts_queue=tts_queue, 
+                                                        provider_name=tts_provider_name, 
+                                                        model=tts_model,
+                                                        voice=tts_voice,
+                                                        language=tts_language,
+                                                        api_key=tts_api_key,
+                                                        base_url=tts_base_url,
+                                                        tracing_data={"tracer": tracer,"parent_span": turn_trace}
+                                                        ))
+                
+                await asyncio.wait_for(tts_queue.put("¿Te puedo ayudar en algo más?"), timeout=2.0)
             
     except Exception as e:
         logger.error(f"TTS Main Loop Exception: {e}", exc_info=True)

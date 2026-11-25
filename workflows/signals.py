@@ -14,6 +14,8 @@ class EndOfStream(SignalFrame):
 class AskUserStillThere(SignalFrame):
     pass
 
-class WarmUp:
+class WarmUp(SignalFrame):
     pass
-    
+
+class EndOfSentences(SignalFrame):
+    pass
