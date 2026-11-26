@@ -125,27 +125,27 @@ async def llm_stream(
                         # The previous turn should normally have been reconciled
                         await state_task
 
-                    with tracer.start_as_current_span("llm.state_extraction", context=parent_ctx) as span:
-
-                        state_task = asyncio.create_task(
-                            extract_state_updates(
-                                user_text=item,
-                                current_state=state, # Dark pattern state is update in place inside the worker.
-                                memory=message_history,
-                                state_schema=state_schema,
-                                http_client=http_client,
-                                provider_url=get_provider_url(EXTRACTOR_LLM_PROVIDER),
-                                api_key=EXTRACTOR_LLM_KEY,
-                                tracing_data={"tracer": tracer, "parent_span": span},
-                                model=EXTRACTOR_MODEL,
-                                
-                            )
+                    
+                    span_llm_extraction =   tracer.start_span("llm.tool_loop", context=parent_ctx) 
+                    state_task = asyncio.create_task(
+                        extract_state_updates(
+                            user_text=item,
+                            current_state=state, # Dark pattern state is update in place inside the worker.
+                            memory=message_history,
+                            state_schema=state_schema,
+                            http_client=http_client,
+                            provider_url=get_provider_url(EXTRACTOR_LLM_PROVIDER),
+                            api_key=EXTRACTOR_LLM_KEY,
+                            tracing_data={"tracer": tracer, "parent_span": span_llm_extraction},
+                            model=EXTRACTOR_MODEL,
+                            
                         )
+                    )
                 
                 
                 
-                with tracer.start_as_current_span("llm.tool_loop", context=parent_ctx) as span:
-                    span.set_attribute(SpanAttributes.INPUT_VALUE, item)
+                    span_llm_loop = tracer.start_span("llm.tool_loop", context=parent_ctx)
+                    span_llm_loop.set_attribute(SpanAttributes.INPUT_VALUE, item)
                     # The extra function to call for a llm provider bring flexibility at runtime
                     
                     # It allows to add new providers it one is down 
@@ -158,7 +158,7 @@ async def llm_stream(
                                                 memory=message_history, 
                                                 tools=tools, 
                                                 http_client=http_client,
-                                                tracing_data={"tracer": tracer, "parent_span": span},
+                                                tracing_data={"tracer": tracer, "parent_span": span_llm_loop},
                                                 model=model,
                                                 system_prompt=system_prompt,
                                                 provider_url=provider_url,
@@ -203,7 +203,7 @@ async def llm_stream(
                                                 memory=message_history, 
                                                 tools=tools, 
                                                 http_client=http_client,
-                                                tracing_data={"tracer": tracer, "parent_span": span},
+                                                tracing_data={"tracer": tracer, "parent_span": span_llm_loop},
                                                 model=model,
                                                 system_prompt=system_prompt,
                                                 provider_url=provider_url,
@@ -218,7 +218,7 @@ async def llm_stream(
                             if item_from_queue is None: # Normal finish
                                 await message_history.add_user_message(item)
                                 await message_history.add_ai_message(full_response, None) 
-                                span.set_attribute(SpanAttributes.OUTPUT_VALUE, full_response)
+                                span_llm_loop.set_attribute(SpanAttributes.OUTPUT_VALUE, full_response)
                                 # Add output value to the span with status ok
                                 yield EndOfSentences()
                                 break
@@ -229,7 +229,7 @@ async def llm_stream(
                                 await message_history.add_user_message(item)
                                 await message_history.add_ai_message("Hasta luego", None)
                                 await asyncio.sleep(0.8) # Wait for the TTS to finish and send EndOfStream
-                                span.set_attribute(SpanAttributes.OUTPUT_VALUE, full_response)
+                                span_llm_loop.set_attribute(SpanAttributes.OUTPUT_VALUE, full_response)
                                 yield EndOfStream()
                                 break
                                 
@@ -284,9 +284,16 @@ async def llm_stream(
         logger.exception("LLM: Unexpected error in producer")
         yield "Hubo un error inesperado."
     finally:
+        span_llm_loop.end()
+        span_llm_extraction.end()
         # Cleanup task if it was orphaned by an error or cancellation
         if current_task and not current_task.done():
             current_task.cancel()
             await asyncio.gather(current_task, return_exceptions=True)
+
+        if state_task and not state_task.done():
+            state_task.cancel()
+            await asyncio.gather(state_task, return_exceptions=True)
+
         #if sentence_queue:
         #    sentence_queue.put_nowait(None) # EOF

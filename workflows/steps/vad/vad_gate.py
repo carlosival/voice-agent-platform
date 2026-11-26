@@ -1,7 +1,7 @@
 
 from workflows.steps.turn.utils import predict_endpoint
 from workflows.signals import SignalFrame, WarmUp, AskUserStillThere, EndOfStream, StartSpeaking, EndSpeaking
-from .utils import silero_has_speech_from_numpy, silero_reset_states, get_silero_model
+from .utils import silero_has_speech_from_numpy, silero_reset_states, get_silero_model, evaluate_utterance, layered_has_speech_chunk
 from yaafpy.types import ExecContext
 from av import AudioFrame
 from typing import AsyncGenerator
@@ -21,7 +21,7 @@ from concurrent.futures import ThreadPoolExecutor
 from .config import (
     CONFIRM_TURN, MAX_UTTERANCE_LEN,
     INACTIVITY_STOP, MAX_ASK_USER, INACTIVITY_FRAMES,
-    START_FRAMES, STOP_FRAMES, VAD_CHUNK_SAMPLES, SILERO_THRESHOLD
+    START_FRAMES, STOP_FRAMES, VAD_CHUNK_SAMPLES, SILERO_THRESHOLD, RMS_THRESHOLD
 )
 
 logger = logging.getLogger(__name__)
@@ -125,7 +125,7 @@ async def vad_gate(source: AsyncGenerator, ctx: ExecContext) -> AsyncGenerator[l
                 buffer = buffer[VAD_CHUNK_SAMPLES:]
 
                 try:
-                    confident = silero_has_speech_from_numpy(pcm=chunk, threshold=SILERO_THRESHOLD, model=silero_model)
+                    confident = layered_has_speech_chunk(pcm=chunk, silero_threshold=SILERO_THRESHOLD, rms_threshold= RMS_THRESHOLD, model=silero_model)
                     
                 except Exception:
                     logger.exception("VAD: inference failed on this chunk")
@@ -204,55 +204,76 @@ async def vad_gate(source: AsyncGenerator, ctx: ExecContext) -> AsyncGenerator[l
                                     # Utterance Buf should exist because Stopping came after speaking 
                                     # Only one time in the pause will be call prediction turn
                                     if utterance_buf and stopping_count == CONFIRM_TURN:
-                                        audio = np.concatenate(utterance_buf).astype(np.float32, copy=False)
-                                        prediction = predict_endpoint(audio)
-                                        probability = prediction.get("probability", 0.0) if isinstance(prediction, dict) else float(prediction)
+                                        is_valid, dur_sec, rms, audio = evaluate_utterance(utterance_buf)
 
-                                        if probability >= 0.60:
-                                            logger.info(f"TURN: Endpoint detected (prob: {probability:.2f}). Ending Speaking Turn Start.")
-                                            state          = VADState.QUIET
-                                            # SIGNAL 3: User is done speaking by model prediction.
-
-                                            # SIGNAL 0: Signal new Turn start and stop old turn if there is one
-                                            if current_turn:
-                                                current_turn.set_status(Status(StatusCode.OK))
-                                                current_turn.end()
-                                            
-                                            turn_count+=1
-                                            
-                                            turn_context = set_span_in_context(conversation_span)
-                                            '''
-                                            turn_context = baggage.set_baggage(
-                                                "turn_sequence",
-                                                turn_count,
-                                                context=turn_context,
-                                            )
-                                            '''
-                                            current_turn = tracer.start_span(
-                                                            f"turn.{turn_count}",
-                                                            context=turn_context,
-                                                            attributes={
-                                                                "session.id": session_id,
-                                                                "turn.id": str(uuid.uuid4()),
-                                                                "turn.seq": turn_count,
-                                                            },
-                                                        )
-                                            yield current_turn
+                                        if not is_valid:
+                                                logger.debug(
+                                                    "TURN: skipping endpoint check — short/quiet puff (dur=%.2fs, rms=%.4f)",
+                                                    dur_sec,
+                                                    rms,
+                                                )
+                                        else:
 
 
-                                            yield EndSpeaking()
-                                            # 4. NOW send the data
-                                            yield utterance_buf
-                                            utterance_buf  = []
-                                            starting_count = 0
-                                            stopping_count = 0
-                                            consecutive_silence_counter = 0
-                                            silero_reset_states(silero_model)
-                                            continue # Skip the hard STOP_FRAMES check if endpointing triggers successfully
+                                            #audio = np.concatenate(utterance_buf).astype(np.float32, copy=False)
+                                            prediction = predict_endpoint(audio)
+                                            probability = prediction.get("probability", 0.0) if isinstance(prediction, dict) else float(prediction)
+
+                                            if probability >= 0.60:
+                                                logger.info(f"TURN: Endpoint detected (prob: {probability:.2f}). Ending Speaking Turn Start.")
+                                                state          = VADState.QUIET
+                                                # SIGNAL 3: User is done speaking by model prediction.
+
+                                                # SIGNAL 0: Signal new Turn start and stop old turn if there is one
+                                                if current_turn:
+                                                    current_turn.set_status(Status(StatusCode.OK))
+                                                    current_turn.end()
+                                                
+                                                turn_count+=1
+                                                
+                                                turn_context = set_span_in_context(conversation_span)
+                                                
+                                                current_turn = tracer.start_span(
+                                                                f"turn.{turn_count}",
+                                                                context=turn_context,
+                                                                attributes={
+                                                                    "session.id": session_id,
+                                                                    "turn.id": str(uuid.uuid4()),
+                                                                    "turn.seq": turn_count,
+                                                                },
+                                                            )
+                                                yield current_turn
+
+
+                                                yield EndSpeaking()
+                                                # 4. NOW send the data
+                                                yield utterance_buf
+                                                utterance_buf  = []
+                                                starting_count = 0
+                                                stopping_count = 0
+                                                consecutive_silence_counter = 0
+                                                silero_reset_states(silero_model)
+                                                continue # Skip the hard STOP_FRAMES check if endpointing triggers successfully
                                 except Exception:
                                     logger.exception("TURN: inference failed during stopping state")      
 
                                 if stopping_count >= STOP_FRAMES:
+
+                                    is_valid, dur_sec, rms, _ = evaluate_utterance(utterance_buf)
+
+                                    if not is_valid:
+                                        logger.info(
+                                            "VAD: discarding invalid utterance at STOP_FRAMES (dur=%.2fs, rms=%.4f)",
+                                            dur_sec,
+                                            rms,
+                                        )
+                                        state = VADState.QUIET
+                                        utterance_buf = []
+                                        starting_count = 0
+                                        stopping_count = 0
+                                        consecutive_silence_counter = 0
+                                        silero_reset_states(silero_model)
+                                        continue
                                     
                                     state          = VADState.QUIET
                                     # SIGNAL 3: User is done speaking by silence time.

@@ -17,6 +17,34 @@ RMS_THRESHOLD      = float(os.getenv("RMS_THRESHOLD", "500"))
 _device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
+
+MIN_UTTERANCE_SEC = 0.40   # ~12–13 chunks of 512 samples at 16 kHz
+MIN_UTTERANCE_RMS = 0.015  # Tune to your mic / transport gain
+
+
+def evaluate_utterance(
+    utterance_buf: list[np.ndarray],
+    sample_rate: int = SILERO_SAMPLE_RATE,
+    min_duration_sec: float = MIN_UTTERANCE_SEC,
+    min_rms: float = MIN_UTTERANCE_RMS,
+) -> tuple[bool, float, float, np.ndarray]:
+    """
+    Returns (is_valid, duration_sec, rms, audio_1d).
+    """
+    if not utterance_buf:
+        return False, 0.0, 0.0, np.empty(0, dtype=np.float32)
+
+    audio = np.concatenate(utterance_buf).astype(np.float32, copy=False).reshape(-1)
+    if audio.size == 0:
+        return False, 0.0, 0.0, audio
+
+    duration_sec = audio.size / float(sample_rate)
+    rms = float(np.sqrt(np.mean(np.square(audio))))
+
+    is_valid = (duration_sec >= min_duration_sec) and (rms >= min_rms)
+    return is_valid, duration_sec, rms, audio
+
+
 # ─── Helpers ──────────────────────────────────────────────────────────────────
 
 def pcm_to_wav(pcm_bytes: bytes, sample_rate: int = SAMPLE_RATE) -> bytes:
@@ -131,14 +159,44 @@ def silero_has_speech_from_numpy(
     """
     pcm: float32 mono, 16 kHz, in [-1, 1], exactly 512 samples.
     """
+    if pcm is None or pcm.size == 0:
+        return False
+
+    arr = np.ascontiguousarray(pcm, dtype=np.float32).reshape(-1) # Alternative  np.ascontiguousarray(pcm, dtype=np.float32)
     model = model or get_silero_model()
-    audio_tensor = torch.from_numpy(
-        np.ascontiguousarray(pcm, dtype=np.float32)
-    ).to(_device)
+    audio_tensor = torch.from_numpy(arr).to(_device)
     with torch.inference_mode():
         confidence = model(audio_tensor, SILERO_SAMPLE_RATE).item()
     return confidence >= threshold
 
+
+def rms_energy_from_numpy(pcm: np.ndarray) -> float:
+    if pcm.size == 0:
+        return 0.0
+    arr = np.asarray(pcm, dtype=np.float32).reshape(-1)
+    return float(np.sqrt(np.mean(np.square(arr))))
+
+def layered_has_speech_chunk(
+    pcm: np.ndarray,
+    rms_threshold: float = 0.01,
+    silero_threshold: float = 0.7,
+    model: Optional[object] = None,
+) -> bool:
+    """
+    Layer 1: RMS energy on the 512-sample chunk (~0ms)
+    Layer 2: Silero speech probability (~0.2ms)
+    """
+    if pcm is None or pcm.size == 0:
+        return False
+
+    if rms_energy_from_numpy(pcm) < rms_threshold:
+        return False
+
+    return silero_has_speech_from_numpy(
+        pcm=pcm,
+        threshold=silero_threshold,
+        model=model,
+    )
 
 # ════════════════════════════════════════════════════════════════════════════════
 # LAYERED — two-layer pipeline for vad_gate

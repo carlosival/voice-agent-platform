@@ -31,3 +31,5 @@ VAD_THRESHOLD   = 0.5
 VAD_STRIDE    = 10  # call VAD every 20 frames -> call every 400ms
 
 SILERO_THRESHOLD = 0.7
+
+RMS_THRESHOLD = 0.01
